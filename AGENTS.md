@@ -170,11 +170,22 @@ uv run python -m build
 - [x] PyPI 自动发布（`.github/workflows/publish.yml` — push `v*` tag 触发 Trusted Publisher 构建上传）
 - [x] 首发 v0.1.0 / v0.1.1 / v0.1.2 已发布
 - [x] v0.1.3 已发布（2026-06-28）
+- [x] v0.1.4 已发布（2026-06-28）
+- [x] v0.1.5 已发布（2026-06-28）
 
 ### 发版流程（当前）
+> 任何一步不绿不得进入下一步。
+
 1. 改版本号：`pyproject.toml` + `src/bili_dl/__init__.py`
 2. 写 CHANGELOG（Keep a Changelog 格式）
-3. lint + test 全绿
+3. 本地全量验证（**三项缺一不可**）：
+   ```bash
+   uv run ruff check src tests        # 逻辑 lint
+   uv run ruff format --check src tests  # 格式检查
+   uv run pytest                       # 单元测试
+   ```
+   - 若 format 报 `Would reformat`，先 `uv run ruff format src tests` 再提交。
 4. `git commit -m "release: vX.Y.Z"`
-5. `git tag -a vX.Y.Z -m "vX.Y.Z"` → push tag
-6. CI 自动构建并发布 PyPI；`curl -k` 调 GitHub API 创建 Release
+5. `git tag -a vX.Y.Z -m "vX.Y.Z"` → push commit + tag
+6. 等 CI 全绿（lint + test 矩阵 + Publish to PyPI）确认无红色
+7. `curl -k` 调 GitHub API 创建 Release
