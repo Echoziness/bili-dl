@@ -1,0 +1,83 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bili-dl"
+version = "0.1.0"
+description = "Cross-platform Bilibili video/audio downloader built on yt-dlp + ffmpeg."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.9"
+authors = [{ name = "Echoziness", email = "217080389+Echoziness@users.noreply.github.com" }]
+keywords = ["bilibili", "downloader", "yt-dlp", "ffmpeg", "video", "audio"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Utilities",
+]
+dependencies = []
+
+[project.scripts]
+bili-dl = "bili_dl.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/Echoziness/bili-dl"
+Repository = "https://github.com/Echoziness/bili-dl"
+Issues = "https://github.com/Echoziness/bili-dl/issues"
+Changelog = "https://github.com/Echoziness/bili-dl/blob/main/CHANGELOG.md"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bili_dl"]
+
+# ─── ruff ───────────────────────────────────────────────────────
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes
+    "I",        # isort
+    "B",        # bugbear
+    "UP",       # pyupgrade
+    "C4",       # comprehensions
+    "SIM",      # simplify
+    "RUF",      # ruff-specific
+]
+ignore = [
+    "E501",     # line-too-long handled by formatter; ruff format respects line-length
+    "RUF001",   # ambiguous CJK punctuation — intentional in zh-facing user messages
+    "UP045",    # keep Optional[X] (clearer for py3.9 audience) over X | None
+    "SIM102",   # collapsible nested if — kept for readability of two-step logic
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S"]  # tests may use asserts/prints
+
+# ─── pytest ─────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+addopts = "-ra -q"
+
+# ─── mypy (optional, not enforced by CI) ─────────────────────────
+[tool.mypy]
+python_version = "3.9"
+strict = false
+ignore_missing_imports = true
+files = ["src/bili_dl"]

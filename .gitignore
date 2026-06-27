@@ -1,0 +1,48 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+wheels/
+*.egg
+MANIFEST
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Test / coverage
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Cookies / runtime secrets — NEVER commit
+cookies_all.txt
+cookies_bilibili.txt
+cookies_bilibili.txt.bak_*
+*.m4a
+*.mp4
+*.mkv
+*.webm
+!tests/data/*.txt

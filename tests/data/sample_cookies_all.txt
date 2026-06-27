@@ -1,0 +1,10 @@
+# Netscape HTTP Cookie File
+# This is a sample full-site export containing both bilibili and other-site
+# cookies. Only the bilibili lines should survive extraction.
+# Domain	Include subdomains	Path	Secure	Expires	Name	Value
+.bilibili.com	TRUE	/	FALSE	0	SESSDATA	abc%2C123%2Cdef
+.bilibili.com	TRUE	/	FALSE	0	bili_jct	9876543210
+.bilibili.com	TRUE	/	FALSE	0	DedeUserID	12345
+www.bilibili.com	FALSE	/	FALSE	0	goof	SessionOnly
+.example.com	TRUE	/	TRUE	0	other_secret	SHOULD_BE_DROPPED
+.example.org	FALSE	/	FALSE	0	foo	bar
