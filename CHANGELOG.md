@@ -5,7 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.2] - 2026-06-28
+
+### Fixed
+- #HttpOnly_ cookie lines from browser exports (Cookie-Editor etc.) are no longer treated as comments and skipped. SESSDATA with this prefix is now correctly extracted and validated.
+
+[0.1.1]: https://github.com/Echoziness/bili-dl/releases/tag/v0.1.1
+[Unreleased]:
 
 ### Added
 - Initial public release.
@@ -36,4 +42,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--version` is now exposed as `-V` (capital), since `-v` is taken by
   `--video`. Matches yt-dlp / curl / pip convention.
 
-[Unreleased]: https://github.com/Echoziness/bili-dl/releases/tag/v0.1.0
+[0.1.2] - 2026-06-28
+
+### Fixed
+- #HttpOnly_ cookie lines from browser exports (Cookie-Editor etc.) are no longer treated as comments and skipped. SESSDATA with this prefix is now correctly extracted and validated.
+
+[0.1.1]: https://github.com/Echoziness/bili-dl/releases/tag/v0.1.1
+[Unreleased]:: https://github.com/Echoziness/bili-dl/releases/tag/v0.1.0
