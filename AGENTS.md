@@ -33,7 +33,7 @@
 
 ### 2.4 Cookie 隐私模型（核心不变量）
 - 永远只从 `cookies_all.txt` 提取含 `bilibili` 的行；其他站点 Cookie 不解析、不存储、不外发。这是项目隐私承诺，任何 PR 不得破坏。
-- 位置：`src/bili_dl/cookies.py` 的 `import_bili_cookie_from_all()` —— 用列表推导显式过滤 `"bilibili" in line`。
+- 位置：`src/bili_dl/cookies.py` 的 `import_bili_cookie()` —— 用列表推导显式过滤 `"bilibili" in line`。
 - 测试锚定：`tests/test_cookies.py` 的 `test_extract_drops_other_sites()` 断言 `other_secret` 不泄漏。
 
 ### 2.5 nav API 在线校验的降级策略
@@ -98,7 +98,9 @@ bili-dl/
 │   ├── test_paths.py              # 跨平台路径分支（mock platform）
 │   ├── test_package.py            # 包导入冒烟测试
 │   └── data/sample_cookies_all.txt
-└── .github/workflows/ci.yml       # Win/macOS/Linux × Py3.9/3.13 矩阵
+└── .github/workflows/
+    ├── ci.yml                     # Win/macOS/Linux × Py3.9/3.13 矩阵
+    └── publish.yml                # push v* tag → 自动构建并发布 PyPI
 ```
 
 ## 4. 关键约定
@@ -124,15 +126,16 @@ bili-dl/
 ## 5. 常用命令
 
 ```bash
-# 开发安装
-pip install -e .
+# 开发安装 (uv 管理 venv + editable)
+uv venv --python 3.9 .venv
+uv pip install -e . ruff pytest
 
 # 检验
-ruff check src tests
-ruff format --check src tests
-pytest            # 或 pytest -q
+uv run ruff check src tests
+uv run ruff format --check src tests
+uv run pytest -q
 
-# 实测下载（需 yt-dlp + ffmpeg，且 cookie 目录有可用 cookies_bilibili.txt）
+# 实测下载（需 yt-dlp + ffmpeg，且 cookie 目录有 cookies_bilibili.txt）
 bili-dl https://www.bilibili.com/video/BVxxxxx
 bili-dl -a https://www.bilibili.com/video/BVxxxxx   # 验证音频 faststart
 
@@ -141,28 +144,37 @@ ffprobe -v error -show_entries format=format_name:format_tags=major_brand,compat
 ffmpeg -v trace -i path.m4a -f null - 2>&1 | findstr /R "moov mdat"   # Win
 ffmpeg -v trace -i path.m4a -f null - 2>&1 | grep -E "moov|mdat"       # Unix
 
-# 构建
-pip install build
-python -m build            # dist/ 出 wheel + sdist
+# 构建（CI publish.yml 自动处理，本地调试用）
+uv pip install build
+uv run python -m build
 ```
 
 ## 6. 环境特异事实（开发者备注）
 
-- **gh / git SSL**：本机证书链存在问题，但实测 `gh api user` 与 SSH 协议 git 操作均正常（账号 Echoziness，git protocol=ssh）。若将来 gh API 失败，再考虑 `git config --global http.sslVerify false`（高风险，需用户批准）。当前无需关闭。
+- **SteamTools MITM 拦截**：WSL 环境有 SteamTools 在本地做 HTTPS 中间人代理，`api.github.com` 证书 issuer 为 `CN=SteamTools Certificate`（非正规 CA）。影响：
+  - `git clone/pull/push` 用 **SSH** 不受影响（已配 `ssh.github.com:443`）。
+  - `gh` CLI（Go TLS）不信任 SteamTools CA，所有 API 调用失败。**解法**：GitHub API 操作改用 `curl -k` 绕过证书校验。示例：
+    ```bash
+    curl -k -X POST https://api.github.com/repos/.../releases -H "Authorization: token $(gh auth token)" ...
+    ```
+  - `pip install bili-dl`（PyPI→GitHub 不走代理）需加 `--trusted-host pypi.org --trusted-host files.pythonhosted.org`。
+  - `git config --global http.sslVerify false` 对 `git` 本身有用，对 `gh`（Go）无效。
+- **PyPI 镜像延迟**：ustc/清华等国内镜像对新发布的版本有滞后（数小时到一天）。ci 自动发布后如需立刻验证安装，用官方 PyPI + `--trusted-host`。
 - **SSH 22 端口被封，走 443**：`git push` 实测 `ssh: connect to host github.com port 22: Connection refused`。解法：`git remote set-url origin ssh://git@ssh.github.com:443/Echoziness/bili-dl.git`，首次 push 用 `GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=accept-new"` 登记 `ssh.github.com:443` 的 host key（ED25519）。此 remote URL 已固化在本地仓库，后续 push 无需再处理。不改全局 config，避免影响其他仓库。
 - **PowerShell 编码**：PowerShell 调子进程时需注入 `chcp 65001` + UTF8，但纯 Python 跨平台版不涉及此（Python3 默认 UTF-8）。此条仅对 bd.ps1 维护有意义。
 
 ## 7. 发布 checklist
 
-### 已完成（v0.1.0 首发上线）
 - [x] 替换 `pyproject.toml` 中 `authors`、`project.urls` 占位（handle=Echoziness，邮箱用 GitHub noreply）
-- [x] 替换 README 徽章 / CHANGELOG 链接中的占位 handle
-- [x] GitHub 建仓库 `Echoziness/bili-dl`（PUBLIC）、推送 main、CI 三平台全绿
-- [x] 占位符清零扫描、敏感文件扫描（无 cookie/媒体进仓库）、lint/format/test 全绿
+- [x] GitHub Actions CI（lint + test 三平台矩阵）已配置
+- [x] PyPI 自动发布（`.github/workflows/publish.yml` — push `v*` tag 触发 Trusted Publisher 构建上传）
+- [x] 首发 v0.1.0 / v0.1.1 / v0.1.2 已发布
+- [x] v0.1.3 已发布（2026-06-28）
 
-### 待办（发 PyPI）
-- [ ] `pip install build && python -m build` 生成 dist（wheel + sdist）
-- [ ] `pip install twine && twine check dist/*` 通过
-- [ ] `twine upload --repository testpypi dist/*` 先发 TestPyPI，验证 `pipx install -i https://test.pypi.org/simple/ bili-dl` 能装能跑
-- [ ] 正式 `twine upload dist/*` 发 PyPI
-- [ ] 打 `v0.1.0` tag 并推送，触发 GitHub Release（`gh release create v0.1.0 --notes-from-tag`）
+### 发版流程（当前）
+1. 改版本号：`pyproject.toml` + `src/bili_dl/__init__.py`
+2. 写 CHANGELOG（Keep a Changelog 格式）
+3. lint + test 全绿
+4. `git commit -m "release: vX.Y.Z"`
+5. `git tag -a vX.Y.Z -m "vX.Y.Z"` → push tag
+6. CI 自动构建并发布 PyPI；`curl -k` 调 GitHub API 创建 Release

@@ -116,21 +116,17 @@ def _prepare_cookie(opts: Options) -> bool:
     """Ensure a valid Bilibili cookie is available; import from all if needed."""
     cookie_ok = cookies.test_cookie_valid(opts.cookie_dir)
     if not cookie_ok:
-        if cookies.import_bili_cookie_from_all(opts.cookie_dir):
+        if cookies.import_bili_cookie(opts.cookie_dir):
             cookie_ok = cookies.test_cookie_valid(opts.cookie_dir)
     if cookie_ok:
         return True
 
+    base_dir = opts.cookie_dir or config_dir()
     print()
     ui.error("[失败] 没有可用的 B 站 Cookie。")
-    ui.warn("  请在浏览器登录 bilibili.com 后导出【全部 Cookie】(Netscape 格式)，")
-    ui.warn(f"  保存到 {(opts.cookie_dir or config_dir()) / cookies.ALL_COOKIE_FILENAME}")
-    ui.warn("  然后重新运行。(Edge 扩展: Get cookies.txt LOCALLY → Export All Cookies)")
-    suspects = cookies.suspect_cookie_files(opts.cookie_dir)
-    if suspects:
-        ui.warn("  注意：检测到以下文件，若其中是全站导出，请重命名为 cookies_all.txt：")
-        for s in suspects:
-            ui.warn(f"    {s.name}")
+    ui.warn("  请先在浏览器登录 bilibili.com，然后导出 Cookie（Netscape 格式），")
+    ui.warn(f"  将导出的 .txt 文件放入以下目录：{base_dir}")
+    ui.warn("  支持任意文件名，只要文件包含 bilibili 条目即可自动识别。")
     print()
     return False
 

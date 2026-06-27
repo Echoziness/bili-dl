@@ -11,8 +11,10 @@ REFERER = "https://www.bilibili.com"
 # Used only by the cookie validity check; yt-dlp sends its own UA when downloading.
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
 
-# Cookie filenames (always plain names; resolved against a directory by callers)
-ALL_COOKIE_FILENAME = "cookies_all.txt"
+# Cookie filenames
+# cookies_bilibili.txt is the extracted output (only .bilibili.com entries).
+# Source files are auto-detected — any .txt file in the cookie directory
+# containing bilibili entries will be recognised.
 BILI_COOKIE_FILENAME = "cookies_bilibili.txt"
 
 # yt-dlp format selectors

@@ -51,7 +51,7 @@ Bilibili requires a login cookie. Use any browser extension that exports
 cookies in **Netscape format** (Cookie-Editor, Get cookies.txt, etc.):
 
 1. Log in to [bilibili.com](https://www.bilibili.com)
-2. Export **All Cookies** — the file should look like:
+2. Export cookies — the file should look like:
 
    ```
    # Netscape HTTP Cookie File
@@ -59,7 +59,7 @@ cookies in **Netscape format** (Cookie-Editor, Get cookies.txt, etc.):
    .bilibili.com	TRUE	/	FALSE	0	bili_jct	<csrf>
    ```
 
-3. Save as `cookies_all.txt` in the cookie directory:
+3. Save the exported `.txt` file in the cookie directory (any filename works):
 
 | OS | Cookie directory |
 |---|---|
@@ -67,8 +67,9 @@ cookies in **Netscape format** (Cookie-Editor, Get cookies.txt, etc.):
 | macOS | `~/Library/Application Support/bili-dl` |
 | Linux | `~/.config/bili-dl` |
 
-Run `bili-dl` once — it extracts only `.bilibili.com` entries and reuses them
-thereafter. Override with `--cookie-dir`.
+Run `bili-dl` once — it auto-detects any `.txt` file containing Bilibili
+entries, extracts only those, and reuses them thereafter. Override with
+`--cookie-dir`.
 
 ### Download
 

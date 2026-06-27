@@ -2,13 +2,14 @@
 
 Two responsibilities, mirroring the original bd.ps1:
 
-1. ``Import-BiliCookieFromAll`` —— read ``cookies_all.txt`` (a full-site
-   Netscape export from a browser extension), keep ONLY lines mentioning
-   ``bilibili``, fix the domain-match column for dot-prefixed domains
-   (Netscape spec: must be TRUE), and write ``cookies_bilibili.txt``.
-   Lines for other sites are never parsed, stored, or sent anywhere.
+1. ``import_bili_cookie`` —— scan the cookie directory for any ``.txt`` file
+   containing ``bilibili`` entries (Netscape format), extract only those lines,
+   fix the domain-match column for dot-prefixed domains (Netscape spec: must be
+   TRUE), and write ``cookies_bilibili.txt``. No specific filename required —
+   any ``.txt`` file with Bilibili cookie lines is auto-detected. Lines for
+   other sites are never parsed, stored, or sent anywhere.
 
-2. ``Test-CookieValid`` —— local format check (has SESSDATA under
+2. ``test_cookie_valid`` —— local format check (has SESSDATA under
    ``.bilibili.com``) plus an online probe against the ``nav`` API to verify
    the session is actually logged in. The probe must send a browser User-Agent
    (Bilibili returns 412 to urllib's default "Python-urllib/x.y" UA). On
@@ -28,7 +29,6 @@ from typing import Optional
 
 from . import ui
 from .config import (
-    ALL_COOKIE_FILENAME,
     BILI_COOKIE_FILENAME,
     NAV_API,
     NAV_TIMEOUT,
@@ -39,10 +39,6 @@ from .paths import config_dir
 
 def bili_cookie_path(cookie_dir: Optional[Path] = None) -> Path:
     return (cookie_dir or config_dir()) / BILI_COOKIE_FILENAME
-
-
-def all_cookie_path(cookie_dir: Optional[Path] = None) -> Path:
-    return (cookie_dir or config_dir()) / ALL_COOKIE_FILENAME
 
 
 def _read_lines(path: Path) -> list[str]:
@@ -97,7 +93,7 @@ def test_cookie_valid(cookie_dir: Optional[Path] = None) -> bool:
 
     sessdata = _extract_sessdata(lines)
     if not sessdata:
-        ui.warn("[提示] 未找到 SESSDATA（可能未登录，或仅导出了当前站点而非全部 Cookie）")
+        ui.warn("[提示] 未找到 SESSDATA（可能未登录，或 Cookie 已过期）")
         return False
 
     online = _online_check(sessdata)
@@ -124,30 +120,51 @@ def test_cookie_valid(cookie_dir: Optional[Path] = None) -> bool:
     return True
 
 
-def import_bili_cookie_from_all(cookie_dir: Optional[Path] = None) -> bool:
-    """Extract only .bilibili.com entries from cookies_all.txt.
+def _find_src_cookie(cookie_dir: Optional[Path] = None) -> Optional[Path]:
+    """Scan the cookie directory for any .txt file containing bilibili entries."""
+    base = cookie_dir or config_dir()
+    if not base.exists():
+        return None
+    candidates = sorted(
+        p for p in base.glob("*.txt") if p.name != BILI_COOKIE_FILENAME
+    )
+    for src in candidates:
+        for line in _read_lines(src):
+            if "bilibili" in line and not line.removeprefix("#HttpOnly_").startswith("#"):
+                if len(candidates) > 1:
+                    ui.info(f"[摄取] 发现 {len(candidates)} 个 Cookie 文件，已使用 {src.name}")
+                else:
+                    ui.info(f"[摄取] 发现 {src.name}，正在提取 B 站 Cookie...")
+                return src
+    return None
 
-    Other-site cookies are neither parsed, stored, nor sent anywhere.
+
+def import_bili_cookie(cookie_dir: Optional[Path] = None) -> bool:
+    """Auto-detect and extract .bilibili.com entries from any .txt file.
+
+    Scans the cookie directory for any .txt file (except cookies_bilibili.txt)
+    that contains bilibili cookie lines. The first match is used. Other-site
+    cookies are neither parsed, stored, nor sent anywhere.
+
     Existing cookies_bilibili.txt is backed up before being overwritten.
     Returns True on success.
     """
-    src = all_cookie_path(cookie_dir)
-    if not src.exists():
+    src = _find_src_cookie(cookie_dir)
+    if not src:
+        ui.error("[错误] 未找到包含 B 站 Cookie 的 .txt 文件")
         return False
 
-    ui.info("[摄取] 发现 cookies_all.txt，正在提取 B 站 Cookie...")
     bili_lines = [
         line
         for line in _read_lines(src)
         if "bilibili" in line and not line.removeprefix("#HttpOnly_").startswith("#")
     ]
     if not bili_lines:
-        ui.error("[错误] cookies_all.txt 中未找到任何 bilibili 字段")
+        ui.error(f"[错误] {src.name} 中未找到任何 bilibili 条目")
         return False
 
     dst = bili_cookie_path(cookie_dir)
     if dst.exists():
-        # Backup existing file for rollback (matches bd.ps1 behaviour)
         bak = dst.with_name(f"{dst.name}.bak_{time.strftime('%Y%m%d_%H%M%S')}")
         with contextlib.suppress(OSError):
             shutil.copy2(dst, bak)
@@ -169,12 +186,11 @@ def import_bili_cookie_from_all(cookie_dir: Optional[Path] = None) -> bool:
 
 
 def suspect_cookie_files(cookie_dir: Optional[Path] = None) -> list[Path]:
-    """Return cookie-like .txt files that aren't the two canonical names.
+    """Return cookie-like .txt files that aren't the output file.
 
     Used to give the user a helpful hint when no valid cookie is found.
     """
     base = cookie_dir or config_dir()
-    canonical = {BILI_COOKIE_FILENAME, ALL_COOKIE_FILENAME}
     if not base.exists():
         return []
-    return [p for p in base.glob("cookies*.txt") if p.name not in canonical]
+    return [p for p in base.glob("*.txt") if p.name != BILI_COOKIE_FILENAME]
