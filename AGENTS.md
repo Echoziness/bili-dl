@@ -156,7 +156,7 @@ python -m build            # dist/ 出 wheel + sdist
 
 ### 已完成（v0.1.0 首发上线）
 - [x] 替换 `pyproject.toml` 中 `authors`、`project.urls` 占位（handle=Echoziness，邮箱用 GitHub noreply）
-- [x] 替换 README 徽章 / CHANGELOG 链接中的 `your-handle`
+- [x] 替换 README 徽章 / CHANGELOG 链接中的占位 handle
 - [x] GitHub 建仓库 `Echoziness/bili-dl`（PUBLIC）、推送 main、CI 三平台全绿
 - [x] 占位符清零扫描、敏感文件扫描（无 cookie/媒体进仓库）、lint/format/test 全绿
 
