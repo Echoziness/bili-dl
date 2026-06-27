@@ -47,12 +47,19 @@ bili-dl -V                   # verify
 
 ### Cookies (one-time)
 
-Bilibili requires a login cookie. Export from your browser:
+Bilibili requires a login cookie. Use any browser extension that exports
+cookies in **Netscape format** (Cookie-Editor, Get cookies.txt, etc.):
 
-1. Install [Get cookies.txt LOCALLY](https://microsoftedge.microsoft.com/addons/detail/get-cookies-txt-locally/ccpbcjjkcbiojbicneopklbjmhklbpca) (Edge/Chrome)
-2. Log in to [bilibili.com](https://www.bilibili.com)
-3. Export **All Cookies** in Netscape format
-4. Save as `cookies_all.txt` in the cookie directory:
+1. Log in to [bilibili.com](https://www.bilibili.com)
+2. Export **All Cookies** — the file should look like:
+
+   ```
+   # Netscape HTTP Cookie File
+   .bilibili.com	TRUE	/	FALSE	0	SESSDATA	<session>
+   .bilibili.com	TRUE	/	FALSE	0	bili_jct	<csrf>
+   ```
+
+3. Save as `cookies_all.txt` in the cookie directory:
 
 | OS | Cookie directory |
 |---|---|
