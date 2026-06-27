@@ -125,9 +125,7 @@ def _find_src_cookie(cookie_dir: Optional[Path] = None) -> Optional[Path]:
     base = cookie_dir or config_dir()
     if not base.exists():
         return None
-    candidates = sorted(
-        p for p in base.glob("*.txt") if p.name != BILI_COOKIE_FILENAME
-    )
+    candidates = sorted(p for p in base.glob("*.txt") if p.name != BILI_COOKIE_FILENAME)
     for src in candidates:
         for line in _read_lines(src):
             if "bilibili" in line and not line.removeprefix("#HttpOnly_").startswith("#"):
