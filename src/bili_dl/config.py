@@ -30,9 +30,6 @@ MODE_LABELS = {
 
 VALID_MODES = ("all", "v", "a")
 
-# Download modes that produce a merged MP4 (need ffmpeg for mux)
-MERGED_MODES = ("all", "v")
-
 # HTTP timeout for the nav validity probe (seconds). 5s matches the original
 # bd.ps1; on flaky networks we gracefully degrade to local-only validation.
 NAV_TIMEOUT = 5.0
