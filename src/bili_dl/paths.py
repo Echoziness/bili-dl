@@ -54,13 +54,13 @@ def default_audio_dir() -> Path:
 
     Windows : ~/Music/bilibili_audio
     macOS   : ~/Music/bilibili_audio
-    Linux   : ~/.local/share/bili-dl/audio  (XDG_DATA_HOME fallback)
+    Linux   : $XDG_DOWNLOAD_DIR/bilibili_audio (fallback ~/Downloads)
     """
     if sys.platform == "darwin":
         return Path.home() / "Music" / "bilibili_audio"
     if sys.platform == "win32":
         return Path.home() / "Music" / "bilibili_audio"
-    return _xdg("XDG_DATA_HOME", Path.home() / ".local" / "share") / APP_NAME / "audio"
+    return _xdg("XDG_DOWNLOAD_DIR", Path.home() / "Downloads") / "bilibili_audio"
 
 
 def ensure_dir(path: Path) -> Path:

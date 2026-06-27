@@ -83,7 +83,7 @@ bili-dl -v https://www.bilibili.com/video/BV...  # video only
 |---|---|---|
 | Windows | `~/Videos/bilibili_videos` | `~/Music/bilibili_audio` |
 | macOS | `~/Movies/bilibili_videos` | `~/Music/bilibili_audio` |
-| Linux | `~/Downloads/bilibili_videos` | `~/.local/share/bili-dl/audio` |
+| Linux | `~/Downloads/bilibili_videos` | `~/Downloads/bilibili_audio` |
 
 Override with `--output-dir` / `--audio-dir`.
 

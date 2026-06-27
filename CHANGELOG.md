@@ -5,13 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2026-06-28
+
+### Changed
+- Linux: audio download directory changed from `~/.local/share/bili-dl/audio` to `~/Downloads/bilibili_audio`, symmetric with video path.
+
 ## [0.1.2] - 2026-06-28
 
 ### Fixed
 - #HttpOnly_ cookie lines from browser exports (Cookie-Editor etc.) are no longer treated as comments and skipped. SESSDATA with this prefix is now correctly extracted and validated.
 
-[0.1.1]: https://github.com/Echoziness/bili-dl/releases/tag/v0.1.1
-[Unreleased]:
+## [0.1.1] - 2026-06-27
+
+### Fixed
+- Fix version string in `__init__.py` after v0.1.0 release.
+
+## [0.1.0] - 2026-06-27
 
 ### Added
 - Initial public release.
@@ -26,7 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`-c:a copy -movflags +faststart`) for both `all` and `a` paths —
   produces `moov`-first ISOM containers friendly to foobar2000 and others.
 - Cross-platform path defaults (Windows Videos/Music, macOS Movies/Music,
-  XDG `~/.local/share/bili-dl` elsewhere).
+  Linux `~/Downloads/bilibili_videos` / `~/.local/share/bili-dl/audio`).
 - Interactive REPL mode plus one-shot non-interactive mode (`bili-dl <URL>`).
 - CLI flags: `--all/-v/-a` modes, `--proxy`, `--insecure/-k`,
   `--output-dir/--audio-dir`, `--cookie-dir`.
@@ -42,10 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--version` is now exposed as `-V` (capital), since `-v` is taken by
   `--video`. Matches yt-dlp / curl / pip convention.
 
-[0.1.2] - 2026-06-28
-
-### Fixed
-- #HttpOnly_ cookie lines from browser exports (Cookie-Editor etc.) are no longer treated as comments and skipped. SESSDATA with this prefix is now correctly extracted and validated.
-
+[0.1.0]: https://github.com/Echoziness/bili-dl/releases/tag/v0.1.0
 [0.1.1]: https://github.com/Echoziness/bili-dl/releases/tag/v0.1.1
-[Unreleased]:: https://github.com/Echoziness/bili-dl/releases/tag/v0.1.0
+[0.1.2]: https://github.com/Echoziness/bili-dl/releases/tag/v0.1.2
+[0.1.3]: https://github.com/Echoziness/bili-dl/releases/tag/v0.1.3

@@ -58,11 +58,19 @@ def test_linux_video_dir_xdg_download(monkeypatch: pytest.MonkeyPatch, tmp_path:
     assert paths.default_video_dir() == dl / "bilibili_videos"
 
 
-def test_audio_dir_linux_xdg_data(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_linux_audio_dir_xdg_download(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(paths.sys, "platform", "linux")
-    data = tmp_path / "share"
-    monkeypatch.setenv("XDG_DATA_HOME", str(data))
-    assert paths.default_audio_dir() == data / "bili-dl" / "audio"
+    dl = tmp_path / "downloads"
+    dl.mkdir()
+    monkeypatch.setenv("XDG_DOWNLOAD_DIR", str(dl))
+    assert paths.default_audio_dir() == dl / "bilibili_audio"
+
+
+def test_linux_audio_dir_fallback(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(paths.sys, "platform", "linux")
+    monkeypatch.setattr(paths.Path, "home", lambda: tmp_path)
+    monkeypatch.delenv("XDG_DOWNLOAD_DIR", raising=False)
+    assert paths.default_audio_dir() == tmp_path / "Downloads" / "bilibili_audio"
 
 
 def test_ensure_dir(tmp_path: Path) -> None:
