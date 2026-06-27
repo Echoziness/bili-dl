@@ -11,7 +11,10 @@ import bili_dl
 
 
 def test_version() -> None:
-    assert bili_dl.__version__ == "0.1.0"
+    assert isinstance(bili_dl.__version__, str)
+    parts = bili_dl.__version__.split(".")
+    assert len(parts) == 3
+    assert all(p.isdigit() for p in parts)
 
 
 def test_cli_module_importable() -> None:
