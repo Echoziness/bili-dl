@@ -85,3 +85,16 @@ def test_backup_created_on_overwrite(tmp_path: Path) -> None:
     backups = list(tmp_path.glob("cookies_bilibili.txt.bak_*"))
     assert len(backups) == 1
     assert "OLD" in backups[0].read_text(encoding="utf-8")
+
+
+def test_httponly_prefix_kept_and_stripped(tmp_path: Path) -> None:
+    """#HttpOnly_ lines must be treated as cookie data, not comments."""
+    src = tmp_path / cookies.ALL_COOKIE_FILENAME
+    src.write_text(DATA.read_text(encoding="utf-8"), encoding="utf-8")
+    cookies.import_bili_cookie_from_all(tmp_path)
+
+    content = cookies.bili_cookie_path(tmp_path).read_text(encoding="utf-8")
+    assert "Cookie_HttpOnly" in content
+    assert "this_should_be_kept" in content
+    # prefix must be stripped from output
+    assert "#HttpOnly_" not in content

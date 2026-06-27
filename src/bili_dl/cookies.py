@@ -54,7 +54,8 @@ def _read_lines(path: Path) -> list[str]:
 
 def _extract_sessdata(lines: list[str]) -> Optional[str]:
     """Return the SESSDATA value from the first matching .bilibili.com line."""
-    for line in lines:
+    for raw_line in lines:
+        line = raw_line.removeprefix("#HttpOnly_")
         if ".bilibili.com" in line and "SESSDATA" in line and not line.startswith("#"):
             fields = line.split("\t")
             if len(fields) >= 7 and fields[6]:
@@ -136,7 +137,9 @@ def import_bili_cookie_from_all(cookie_dir: Optional[Path] = None) -> bool:
 
     ui.info("[摄取] 发现 cookies_all.txt，正在提取 B 站 Cookie...")
     bili_lines = [
-        line for line in _read_lines(src) if "bilibili" in line and not line.startswith("#")
+        line
+        for line in _read_lines(src)
+        if "bilibili" in line and not line.removeprefix("#HttpOnly_").startswith("#")
     ]
     if not bili_lines:
         ui.error("[错误] cookies_all.txt 中未找到任何 bilibili 字段")
@@ -149,9 +152,11 @@ def import_bili_cookie_from_all(cookie_dir: Optional[Path] = None) -> bool:
         with contextlib.suppress(OSError):
             shutil.copy2(dst, bak)
 
-    # Fix Netscape column 2 (domain-match flag): dot-prefixed domains -> TRUE
+    # Fix Netscape column 2 (domain-match flag): dot-prefixed domains -> TRUE.
+    # Also strip #HttpOnly_ prefix that some extensions add for HttpOnly cookies.
     out = ["# Netscape HTTP Cookie File"]
-    for line in bili_lines:
+    for raw_line in bili_lines:
+        line = raw_line.removeprefix("#HttpOnly_")
         fields = line.split("\t")
         if len(fields) >= 7 and fields[0].startswith(".") and fields[1] != "TRUE":
             fields[1] = "TRUE"
