@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "bili-dl"
-version = "0.1.5"
+dynamic = ["version"]
 description = "Cross-platform Bilibili video/audio downloader built on yt-dlp + ffmpeg."
 readme = "README.md"
 license = "MIT"
@@ -41,6 +41,9 @@ Changelog = "https://github.com/Echoziness/bili-dl/blob/main/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/bili_dl"]
+
+[tool.hatch.version]
+path = "src/bili_dl/__init__.py"
 
 # ─── ruff ───────────────────────────────────────────────────────
 [tool.ruff]

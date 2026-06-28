@@ -13,9 +13,9 @@ foobar2000-friendly audio output.
 
 ## Features
 
-- **Cookie-safe** — drop `cookies_all.txt` next to the tool, and only the
-  `.bilibili.com` entries are extracted. Other-site cookies are never parsed,
-  stored, or sent anywhere.
+- **Cookie-safe** — drop any `.txt` cookie export next to the tool, and only
+  the Bilibili-domain entries are extracted. Other-site cookies are never
+  parsed, stored, or sent anywhere.
 - **Cookie-verified** — probes Bilibili's `nav` API to confirm your session is
   actually logged in before downloading.
 - **foobar2000-friendly audio** — every produced M4A goes through a zero-loss
@@ -102,7 +102,7 @@ Override with `--output-dir` / `--audio-dir`.
 
 ## Privacy
 
-- Only `.bilibili.com` cookie lines are kept; all others are discarded in
+- Only Bilibili-domain cookie lines are kept; all others are discarded in
   memory — never written to disk or sent anywhere.
 - Network requests go only to `api.bilibili.com` (login probe) and the URLs
   you provide (via `yt-dlp`). No telemetry, no analytics.

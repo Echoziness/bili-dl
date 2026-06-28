@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.6] - 2026-06-28
+
+### Changed
+- Version is now sourced dynamically from `__init__.py` via hatchling's
+  `dynamic = ["version"]`, eliminating the manual two-place version sync
+  that caused the v0.1.1 incident.
+- README cookie wording now says "Bilibili-domain entries" instead of
+  specifically `.bilibili.com`, matching the actual filter behaviour
+  (`www.bilibili.com` entries are kept too).
+
+### Fixed
+- nav API probe no longer makes a redundant second request just to fetch
+  the username — both `isLogin` and `uname` come from a single call.
+- Phase 2 download now checks yt-dlp's return code; a non-zero exit is
+  reported as failure even if a partial file was written to disk.
+
+### Added
+- Unit tests for `downloader._common_args`, `_template_for`, `_format_for`
+  and `cli._build_parser` (previously untested pure logic).
+- `test_www_bilibili_kept` asserting `www.bilibili.com` entries are kept.
+
+### CI
+- `publish.yml` now requires the test job to pass before publishing to PyPI.
+
 ## [0.1.5] - 2026-06-28
 
 ### Changed
@@ -74,3 +98,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.1.3]: https://github.com/Echoziness/bili-dl/releases/tag/v0.1.3
 [0.1.4]: https://github.com/Echoziness/bili-dl/releases/tag/v0.1.4
 [0.1.5]: https://github.com/Echoziness/bili-dl/releases/tag/v0.1.5
+[0.1.6]: https://github.com/Echoziness/bili-dl/releases/tag/v0.1.6

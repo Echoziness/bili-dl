@@ -116,3 +116,14 @@ def test_bili_output_ignored(tmp_path: Path) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(".bilibili.com\tTRUE\t/\tFALSE\t0\tSESSDATA\tOLD\n", encoding="utf-8")
     assert cookies.import_bili_cookie(tmp_path) is False
+
+
+def test_www_bilibili_kept(tmp_path: Path) -> None:
+    """www.bilibili.com entries are bilibili-domain and should be kept."""
+    src = tmp_path / "cookies_export.txt"
+    src.write_text(DATA.read_text(encoding="utf-8"), encoding="utf-8")
+    cookies.import_bili_cookie(tmp_path)
+
+    content = cookies.bili_cookie_path(tmp_path).read_text(encoding="utf-8")
+    assert "SessionOnly" in content
+    assert "www.bilibili.com" in content

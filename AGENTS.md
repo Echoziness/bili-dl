@@ -5,7 +5,7 @@
 ## 1. 技术栈
 
 - **语言**：Python 3.9+（目标 3.9 兼容，CI 跑 3.9/3.13）
-- **构建**：hatchling（`pyproject.toml` 声明，`src/` 布局）
+- **构建**：hatchling（`pyproject.toml` 声明，`src/` 布局，版本号动态读取 `__init__.py`）
 - **运行时依赖**：**零** —— 仅用标准库（`subprocess`、`urllib`、`pathlib`、`ctypes`、`argparse`、`json`、`shutil`）。
 - **外部程序依赖**：`yt-dlp`（必需，找不到则报错退出）、`ffmpeg`（可选，缺失则降级跳过音频提取/容器修复）。
 - **工具链**：ruff（lint+format）、pytest（测试）。无 mypy 强制。
@@ -32,9 +32,10 @@
 - **位置**：`src/bili_dl/ffmpeg.py` 的 `repair_audio_container()` / `extract_audio()`，后者提取后必调前者。
 
 ### 2.4 Cookie 隐私模型（核心不变量）
-- 永远只从 `cookies_all.txt` 提取含 `bilibili` 的行；其他站点 Cookie 不解析、不存储、不外发。这是项目隐私承诺，任何 PR 不得破坏。
-- 位置：`src/bili_dl/cookies.py` 的 `import_bili_cookie()` —— 用列表推导显式过滤 `"bilibili" in line`。
-- 测试锚定：`tests/test_cookies.py` 的 `test_extract_drops_other_sites()` 断言 `other_secret` 不泄漏。
+- **过滤规则**：用 `"bilibili" in line` 匹配，保留所有 B 站域名行（含 `.bilibili.com` 和 `www.bilibili.com`）；其他站点 Cookie 不解析、不存储、不外发。这是项目隐私承诺，任何 PR 不得破坏。
+- **源文件自动检测**（v0.1.5 起）：扫描 cookie 目录下任意 `.txt` 文件（排除输出文件 `cookies_bilibili.txt`），第一个含 bilibili 条目的即用作源。不再要求特定文件名 `cookies_all.txt`，旧文件名仍透明兼容。
+- 位置：`src/bili_dl/cookies.py` 的 `import_bili_cookie()` + `_find_src_cookie()`。
+- 测试锚定：`tests/test_cookies.py` 的 `test_extract_drops_other_sites()` 断言 `other_secret` 不泄漏；`test_www_bilibili_kept()` 断言 `www.bilibili.com` 行被保留；`test_any_txt_filename_detected()` 断言任意文件名可识别。
 
 ### 2.5 nav API 在线校验的降级策略
 - **现象**：在线校验 Cookie 需调 `https://api.bilibili.com/x/web-interface/nav`，但网络/SSL 错误时不能因此阻断下载（本地格式可能仍有效）。
@@ -48,6 +49,7 @@
 - **验证**：实跑 `bili-dl`（无 URL）开头即显示 `[OK] Cookie 有效 | 已登录: <uname>`。
 - **启示**：`except Exception` 太宽会把业务级 HTTP 错误（412/403/404）混进"网络问题"分支。后续若想精确分级，可在 `_online_check` 单独 catch `urllib.error.HTTPError` 拿 status，把 412/403 报为"被风控"而非"网络错误"。当前简单加 UA 已解。
 - **关联**：用户曾因 `-k` 也无效而怀疑证书；`-k` 只影响 yt-dlp 的 `--no-check-certificate`，**对 urllib 探测无影响**（urllib 默认就校验，且本机 CA 没问题）。下次有人误以为证书，先查 UA。
+- **v0.1.6 优化**：原先在线校验成功后又发一次完全相同的 nav 请求仅为拿 `uname`，现已合并为单次 `_nav_probe()` 调用，`isLogin` 和 `uname` 从同一响应提取。
 
 ### 2.7 TLS 证书校验默认开（安全硬化）
 - 原 bd.ps1 无条件 `--no-check-certificate` 是降级项；Python 版默认启用校验，仅 `-k/--insecure` 显式关闭，用于自签证书环境。
@@ -72,6 +74,11 @@
 - **实测**：`bili-dl -V` → `bili-dl 0.1.0`；`bili-dl --version` 同效；`bili-dl -v <url>` 仍仅视频模式。
 - **教训**：CLI 短选项是稀缺资源（26 字母），命名时优先排雷 `-V/--version`、`-v/--verbose`、`-h/--help` 这类高频占用。本工具占用清单：`-a/-v` 模式、`-k` insecure、`-V` version、`-h` help。
 
+### 2.11 Phase 2 下载须检查 returncode（半文件误报成功）
+- **现象**：原实现仅靠 `out_path.exists()` 判断下载是否成功，忽略 yt-dlp 的退出码。若 yt-dlp 中途崩溃但已写入半个文件，`exists()` 返回 True，误报 `[完成!]`。
+- **解法**：`downloader.py` Phase 2 的 `subprocess.run` 结果检查 `returncode != 0 or not out_path.exists()`，两者任一为真即报失败。
+- **位置**：`src/bili_dl/downloader.py::download()` Phase 2 段。
+
 ## 3. 项目结构
 
 ```
@@ -89,7 +96,7 @@ bili-dl/
 │   ├── cli.py                     # argparse + REPL + main()（主入口）
 │   ├── config.py                  # 纯常量，无可变状态
 │   ├── paths.py                   # 跨平台路径（Win/macOS/Linux）
-│   ├── cookies.py                 # Netscape 提取 + 在线/本地校验
+│   ├── cookies.py                 # 自动检测 + Netscape 提取 + 在线/本地校验
 │   ├── ffmpeg.py                  # ffprobe/ffmpeg 探测 + 零损失重封装/提取
 │   ├── downloader.py              # yt-dlp 两阶段下载（预测路径 → 实下）
 │   └── ui.py                      # ANSI 彩色输出（Win10+ 启用 VT）
@@ -172,11 +179,12 @@ uv run python -m build
 - [x] v0.1.3 已发布（2026-06-28）
 - [x] v0.1.4 已发布（2026-06-28）
 - [x] v0.1.5 已发布（2026-06-28）
+- [x] v0.1.6 已发布（2026-06-28）
 
 ### 发版流程（当前）
 > 任何一步不绿不得进入下一步。
 
-1. 改版本号：`pyproject.toml` + `src/bili_dl/__init__.py`
+1. 改版本号：仅 `src/bili_dl/__init__.py`（`pyproject.toml` 用 hatchling `dynamic = ["version"]` 自动读取）
 2. 写 CHANGELOG（Keep a Changelog 格式）
 3. 本地全量验证（**三项缺一不可**）：
    ```bash
@@ -187,5 +195,5 @@ uv run python -m build
    - 若 format 报 `Would reformat`，先 `uv run ruff format src tests` 再提交。
 4. `git commit -m "release: vX.Y.Z"`
 5. `git tag -a vX.Y.Z -m "vX.Y.Z"` → push commit + tag
-6. 等 CI 全绿（lint + test 矩阵 + Publish to PyPI）确认无红色
+6. 等 CI 全绿（lint + test 矩阵 + Publish to PyPI 含 test 前置）确认无红色
 7. `curl -k` 调 GitHub API 创建 Release

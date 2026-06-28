@@ -59,8 +59,8 @@ def _extract_sessdata(lines: list[str]) -> Optional[str]:
     return None
 
 
-def _online_check(sessdata: str) -> Optional[bool]:
-    """Probe the nav API; return True if logged in, False if not, None on error.
+def _nav_probe(sessdata: str) -> Optional[dict]:
+    """Probe the nav API; return parsed JSON on success, ``None`` on error.
 
     ``None`` signals a network/SSL error —— caller should degrade to local
     validation rather than failing hard.
@@ -70,8 +70,7 @@ def _online_check(sessdata: str) -> Optional[bool]:
             NAV_API, headers={"Cookie": f"SESSDATA={sessdata}", "User-Agent": USER_AGENT}
         )
         with urllib.request.urlopen(req, timeout=NAV_TIMEOUT) as resp:
-            data = json.loads(resp.read().decode("utf-8", errors="replace"))
-            return bool(data.get("code") == 0 and data.get("data", {}).get("isLogin"))
+            return json.loads(resp.read().decode("utf-8", errors="replace"))
     except Exception:
         return None
 
@@ -96,28 +95,18 @@ def test_cookie_valid(cookie_dir: Optional[Path] = None) -> bool:
         ui.warn("[提示] 未找到 SESSDATA（可能未登录，或 Cookie 已过期）")
         return False
 
-    online = _online_check(sessdata)
-    if online is True:
-        # Fetch uname for friendly confirmation — reuse one more nav call only
-        # in the success path; failure here doesn't change the verdict.
-        try:
-            req = urllib.request.Request(
-                NAV_API, headers={"Cookie": f"SESSDATA={sessdata}", "User-Agent": USER_AGENT}
-            )
-            with urllib.request.urlopen(req, timeout=NAV_TIMEOUT) as resp:
-                data = json.loads(resp.read().decode("utf-8", errors="replace"))
-                uname = data.get("data", {}).get("uname", "?")
-                ui.ok(f"[OK] Cookie 有效 | 已登录: {uname}")
-        except Exception:
-            ui.ok("[OK] Cookie 有效 | 已登录")
+    data = _nav_probe(sessdata)
+    if data is None:
+        # Network/SSL error — degrade to local-only validation
+        ui.warn("[警告] 无法在线验证 Cookie（网络/SSL 错误），降级为本地格式校验")
+        ui.ok("[OK] 本地格式校验通过")
         return True
-    if online is False:
-        ui.warn("[提示] 现有 Cookie 已失效（服务端返回未登录）")
-        return False
-    # online is None —— network error, degrade
-    ui.warn("[警告] 无法在线验证 Cookie（网络/SSL 错误），降级为本地格式校验")
-    ui.ok("[OK] 本地格式校验通过")
-    return True
+    if data.get("code") == 0 and data.get("data", {}).get("isLogin"):
+        uname = data.get("data", {}).get("uname", "?")
+        ui.ok(f"[OK] Cookie 有效 | 已登录: {uname}")
+        return True
+    ui.warn("[提示] 现有 Cookie 已失效（服务端返回未登录）")
+    return False
 
 
 def _find_src_cookie(cookie_dir: Optional[Path] = None) -> Optional[Path]:

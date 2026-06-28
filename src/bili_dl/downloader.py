@@ -109,10 +109,10 @@ def download(
     out_path = Path(predict.stdout.strip())
 
     # Phase 2: real download (inherit stdout/stderr for the progress bar) ----
-    subprocess.run([ytdlp, *common, "-f", fmt, *merge, "-o", tmpl, url])
+    result = subprocess.run([ytdlp, *common, "-f", fmt, *merge, "-o", tmpl, url])
 
     print()
-    if not out_path.exists():
+    if result.returncode != 0 or not out_path.exists():
         ui.error("[失败]")
         return False
 
