@@ -149,7 +149,7 @@
 
 ### 2.21 审查优化与覆盖率守门（v0.2.7）
 - **背景**：全面审查评估为 A-，扣分集中在覆盖率脱节（实测 63% vs 文档 §2.16 写 87%）+ CI 无 fail-under 闸门 + 5 个轻微问题。本轮做系统优化达 A。
-- **覆盖率**：从 63% 提升到 **98%**（107→158 测试）。补齐 cli/ui/ffmpeg/cookiesource/cookiestore/downloader/settings/paths 全模块短板分支。CI `coverage report --fail-under=70` 设闸门，覆盖率下滑会让 CI 变红。
+- **覆盖率**：从 63% 提升到 **98%**（107→159 测试）。补齐 cli/ui/ffmpeg/cookiesource/cookiestore/downloader/settings/paths 全模块短板分支。CI `coverage report --fail-under=70` 设闸门，覆盖率下滑会让 CI 变红。
 - **轻微问题修复**：
   - 代理环境变量认大小写（`HTTPS_PROXY`/`https_proxy`/`HTTP_PROXY`/`http_proxy`），符合 curl/git/requests 惯例。Windows 环境变量本身大小写不敏感，Linux/macOS 区分（故大小写优先级测试无法在 Windows 跑，仅测小写被识别）。
   - `settings.load` 对 `insecure` 做 `isinstance(bool)` 校验，非 bool 值（如 `"yes"`、`1`）coerce 为 `None`，防止下游 `cfg.insecure or False` 拾取 truthy 字符串。
