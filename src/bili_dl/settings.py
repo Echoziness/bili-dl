@@ -62,7 +62,7 @@ def load(path: Path) -> Settings:
 
     return Settings(
         mode=data.get("mode"),
-        proxy=data.get("proxy") or None,
+        proxy=data.get("proxy"),  # None if key missing, "" if explicit disable
         insecure=insecure,
         video_dir=Path(data["video_dir"]) if data.get("video_dir") else None,
         audio_dir=Path(data["audio_dir"]) if data.get("audio_dir") else None,

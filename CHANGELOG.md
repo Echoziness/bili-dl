@@ -5,10 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.8] - 2026-06-28
+## [0.2.9] - 2026-06-28
 
-### Fixed — Follow-up from third-party review
+### Fixed — Follow-up from third-party review (3 issues)
 
+- **Config `proxy = ""` semantics**: `settings.load` no longer coerces an
+  explicit empty proxy string to `None`. A user writing `proxy = ""` in
+  `config.toml` means "I want no proxy" — previously `""` was silently
+  normalised to `None`, which triggered the environment-variable fallback
+  (`HTTPS_PROXY`/`HTTP_PROXY`) and caused the tool to use a system proxy
+  despite the explicit disable. Now `""` is preserved through the merge chain
+  and blocks the env fallback.
 - **Docstring priority**: `cli.py` module docstring now correctly states CLI >
   config > env (matching the actual `_merge_settings` implementation and
   AGENTS.md §2.17). Previously it claimed env took precedence over config,

@@ -50,11 +50,13 @@ def test_load_partial(tmp_path: Path) -> None:
     assert result.video_dir is None
 
 
-def test_load_empty_proxy_becomes_none(tmp_path: Path) -> None:
+def test_load_empty_proxy_preserved(tmp_path: Path) -> None:
+    """proxy = "" in config means 'explicitly disable' — must not be
+    coerced to None, which would fall through to env vars (§audit)."""
     f = tmp_path / "config.toml"
     f.write_text('proxy = ""\n', encoding="utf-8")
     result = settings.load(f)
-    assert result.proxy is None
+    assert result.proxy == ""  # stays "" — caller can distinguish from unset
 
 
 def test_load_empty_file(tmp_path: Path) -> None:

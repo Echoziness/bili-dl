@@ -489,3 +489,17 @@ def test_merge_proxy_lowercase_env(monkeypatch: pytest.MonkeyPatch) -> None:
     args = _build_parser().parse_args([])
     opts = cli._merge_settings(args, settings.Settings())
     assert opts.proxy == "http://lower:9999"
+
+
+def test_empty_proxy_in_config_blocks_env_proxy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """proxy="" in config means 'no proxy' — must NOT fall through to env."""
+    monkeypatch.setenv("HTTPS_PROXY", "http://evil:9999")
+    monkeypatch.delenv("https_proxy", raising=False)
+    monkeypatch.delenv("HTTP_PROXY", raising=False)
+    monkeypatch.delenv("http_proxy", raising=False)
+    args = _build_parser().parse_args([])
+    cfg = settings.Settings(proxy="")  # explicit empty = disable
+    opts = cli._merge_settings(args, cfg)
+    assert opts.proxy == ""  # not "http://evil:9999"
