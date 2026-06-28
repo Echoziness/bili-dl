@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from .config import REPAIR_MIN_SIZE_RATIO, MsgLevel
+from .config import REPAIR_MIN_SIZE_RATIO
 
 
 @dataclass
@@ -34,7 +34,7 @@ class RepairResult:
     """Outcome of an audio container repair."""
 
     success: bool
-    messages: list[tuple[MsgLevel, str]] = field(default_factory=list)
+    messages: list[tuple[str, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -42,7 +42,7 @@ class ExtractResult:
     """Outcome of an audio extraction + container repair."""
 
     success: bool
-    messages: list[tuple[MsgLevel, str]] = field(default_factory=list)
+    messages: list[tuple[str, str]] = field(default_factory=list)
     audio_path: Optional[Path] = None
 
 

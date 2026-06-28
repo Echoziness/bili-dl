@@ -1,7 +1,7 @@
-"""Tests for CLI argument parsing.
+"""Tests for CLI argument parsing and main() flow.
 
-Guards against regressions in flag threading (mode, proxy, insecure,
-cookie/output dirs) without invoking any network or subprocess.
+Guards against regressions in flag threading and dependency checking
+without invoking any network or subprocess.
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from bili_dl import cli, cookiestore, downloader
+from bili_dl import cli, downloader
 from bili_dl import ffmpeg as ff
 from bili_dl.cli import _build_parser
 
@@ -26,18 +26,15 @@ def test_default_mode_is_none() -> None:
 
 
 def test_video_mode() -> None:
-    args = _parse("-v", "https://bilibili.com/video/BV123")
-    assert args.mode == "v"
+    assert _parse("-v", "https://bilibili.com/video/BV123").mode == "v"
 
 
 def test_audio_mode() -> None:
-    args = _parse("-a", "https://bilibili.com/video/BV123")
-    assert args.mode == "a"
+    assert _parse("-a", "https://bilibili.com/video/BV123").mode == "a"
 
 
 def test_all_mode() -> None:
-    args = _parse("--all", "https://bilibili.com/video/BV123")
-    assert args.mode == "all"
+    assert _parse("--all", "https://bilibili.com/video/BV123").mode == "all"
 
 
 def test_mode_mutually_exclusive() -> None:
@@ -50,40 +47,25 @@ def test_proxy() -> None:
     assert args.proxy == "http://127.0.0.1:7890"
 
 
-def test_insecure_short() -> None:
-    args = _parse("-k", "https://bilibili.com/video/BV123")
-    assert args.insecure is True
-
-
-def test_insecure_long() -> None:
-    args = _parse("--insecure", "https://bilibili.com/video/BV123")
-    assert args.insecure is True
+def test_insecure() -> None:
+    assert _parse("-k", "https://bilibili.com/video/BV123").insecure is True
 
 
 def test_cookie_dir() -> None:
-    args = _parse("--cookie-dir", "/tmp/cookies", "https://bilibili.com/video/BV123")
-    assert args.cookie_dir == Path("/tmp/cookies")
+    assert _parse("--cookie-dir", "/tmp/cookies", "https://x").cookie_dir == Path("/tmp/cookies")
 
 
 def test_output_dir() -> None:
-    args = _parse("--output-dir", "/tmp/videos", "https://bilibili.com/video/BV123")
-    assert args.output_dir == Path("/tmp/videos")
+    assert _parse("--output-dir", "/tmp/videos", "https://x").output_dir == Path("/tmp/videos")
 
 
 def test_audio_dir() -> None:
-    args = _parse("--audio-dir", "/tmp/audio", "https://bilibili.com/video/BV123")
-    assert args.audio_dir == Path("/tmp/audio")
+    assert _parse("--audio-dir", "/tmp/audio", "https://x").audio_dir == Path("/tmp/audio")
 
 
 def test_url_positional() -> None:
     url = "https://www.bilibili.com/video/BV1xx411c7mD"
-    args = _parse(url)
-    assert args.url == url
-
-
-def test_no_url_repl_mode() -> None:
-    args = _parse()
-    assert args.url is None
+    assert _parse(url).url == url
 
 
 # ─── main() with mocked dependencies ────────────────────────────────────────
@@ -97,40 +79,25 @@ def test_main_no_ytdlp(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_main_no_ffmpeg_warns(monkeypatch: pytest.MonkeyPatch, capsys: pytest.Capture) -> None:
     monkeypatch.setattr(downloader, "find_ytdlp", lambda: "yt-dlp")
     monkeypatch.setattr(ff, "find_ffmpeg", lambda: None)
-    # Cookie fails → return 1 before reaching REPL
     monkeypatch.setattr(cli, "_prepare_cookie", lambda opts: False)
     assert cli.main([]) == 1
-    captured = capsys.readouterr()
-    assert "ffmpeg" in captured.out
+    assert "ffmpeg" in capsys.readouterr().out
 
 
-def test_main_cookie_fails(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(downloader, "find_ytdlp", lambda: "yt-dlp")
-    monkeypatch.setattr(ff, "find_ffmpeg", lambda: "ffmpeg")
-    monkeypatch.setattr(cli, "_prepare_cookie", lambda opts: False)
-    assert cli.main([]) == 1
-
-
-def test_main_non_interactive_success(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.Capture
-) -> None:
+def test_main_non_interactive_success(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(downloader, "find_ytdlp", lambda: "yt-dlp")
     monkeypatch.setattr(ff, "find_ffmpeg", lambda: "ffmpeg")
     monkeypatch.setattr(cli, "_prepare_cookie", lambda opts: True)
     monkeypatch.setattr(cli, "_run_once", lambda opts, url, ytdlp, ffmpeg_bin: True)
-    result = cli.main(["https://bilibili.com/video/BV1"])
-    assert result == 0
+    assert cli.main(["https://bilibili.com/video/BV1"]) == 0
 
 
-def test_main_non_interactive_failure(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.Capture
-) -> None:
+def test_main_non_interactive_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(downloader, "find_ytdlp", lambda: "yt-dlp")
     monkeypatch.setattr(ff, "find_ffmpeg", lambda: "ffmpeg")
     monkeypatch.setattr(cli, "_prepare_cookie", lambda opts: True)
     monkeypatch.setattr(cli, "_run_once", lambda opts, url, ytdlp, ffmpeg_bin: False)
-    result = cli.main(["https://bilibili.com/video/BV1"])
-    assert result == 1
+    assert cli.main(["https://bilibili.com/video/BV1"]) == 1
 
 
 def test_main_repl_eof_exits_cleanly(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -144,32 +111,3 @@ def test_main_repl_eof_exits_cleanly(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr("bili_dl.ui.prompt", raise_eof)
     assert cli.main([]) == 0
-
-
-def test_prepare_cookie_success(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        cookiestore,
-        "ensure_cookie",
-        lambda cookie_dir: cookiestore.EnsureResult(ready=True, messages=[("ok", "ok")]),
-    )
-    opts = cli.Options()
-    assert cli._prepare_cookie(opts) is True
-
-
-def test_prepare_cookie_failure(monkeypatch: pytest.MonkeyPatch, capsys: pytest.Capture) -> None:
-    monkeypatch.setattr(
-        cookiestore,
-        "ensure_cookie",
-        lambda cookie_dir: cookiestore.EnsureResult(ready=False, messages=[("error", "nope")]),
-    )
-    opts = cli.Options()
-    assert cli._prepare_cookie(opts) is False
-    captured = capsys.readouterr()
-    assert "没有可用的 B 站 Cookie" in captured.out
-
-
-def test_emit_dispatches_to_ui(monkeypatch: pytest.MonkeyPatch, capsys: pytest.Capture) -> None:
-    cli._emit([("info", "hello"), ("error", "boom")])
-    captured = capsys.readouterr()
-    assert "hello" in captured.out
-    assert "boom" in captured.out

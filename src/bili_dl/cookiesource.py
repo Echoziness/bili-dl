@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from .config import BILI_COOKIE_FILENAME, MsgLevel
+from .config import BILI_COOKIE_FILENAME
 from .paths import config_dir
 
 
@@ -29,7 +29,7 @@ class ImportResult:
     """Outcome of a cookie import attempt."""
 
     success: bool
-    messages: list[tuple[MsgLevel, str]] = field(default_factory=list)
+    messages: list[tuple[str, str]] = field(default_factory=list)
     count: int = 0
     source: Optional[Path] = None
 
@@ -83,7 +83,7 @@ def import_cookie(cookie_dir: Optional[Path] = None, dest: Optional[Path] = None
             messages=[("error", "[错误] 未找到包含 B 站 Cookie 的 .txt 文件")],
         )
 
-    msgs: list[tuple[MsgLevel, str]] = []
+    msgs: list[tuple[str, str]] = []
     base = cookie_dir or config_dir()
     candidates = sorted(p for p in base.glob("*.txt") if p.name != BILI_COOKIE_FILENAME)
     if len(candidates) > 1:

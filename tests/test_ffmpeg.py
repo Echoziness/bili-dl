@@ -3,7 +3,6 @@
 No real ffmpeg invoked. Covers:
 * repair_audio_container: file missing / success / ffmpeg fails / temp too small
 * extract_audio: ffmpeg fails / success (two subprocess calls)
-* find_ffmpeg / _run
 """
 
 from __future__ import annotations
@@ -13,14 +12,6 @@ from pathlib import Path
 import pytest
 
 from bili_dl import ffmpeg as ff
-
-# ─── find_ffmpeg ────────────────────────────────────────────────────────────
-
-
-def test_find_ffmpeg_returns_str_or_none() -> None:
-    result = ff.find_ffmpeg()
-    assert result is None or isinstance(result, str)
-
 
 # ─── repair_audio_container ─────────────────────────────────────────────────
 

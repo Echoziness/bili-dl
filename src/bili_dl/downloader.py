@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Optional
 
 from . import ffmpeg as ff
-from .config import FMT_AUDIO, FMT_AV, REFERER, MsgLevel
+from .config import FMT_AUDIO, FMT_AV, REFERER
 
 
 @dataclass
@@ -55,7 +55,7 @@ class DownloadResult:
     """Outcome of a download + post-processing operation."""
 
     success: bool
-    messages: list[tuple[MsgLevel, str]] = field(default_factory=list)
+    messages: list[tuple[str, str]] = field(default_factory=list)
     output_path: Optional[Path] = None
 
 
@@ -144,7 +144,7 @@ def download(url: str, cfg: DownloadConfig) -> DownloadResult:
 
     # Post-processing ---------------------------------------------------------
     if cfg.mode == "a":
-        msgs: list[tuple[MsgLevel, str]] = [("ok", f"[完成!] 音频: {out_path}")]
+        msgs: list[tuple[str, str]] = [("ok", f"[完成!] 音频: {out_path}")]
         if cfg.ffmpeg_bin:
             repair = ff.repair_audio_container(out_path, cfg.ffmpeg_bin)
             msgs.extend(repair.messages)
@@ -153,7 +153,7 @@ def download(url: str, cfg: DownloadConfig) -> DownloadResult:
         return DownloadResult(success=True, messages=msgs, output_path=out_path)
 
     # mode == "all" or "v" — video path
-    video_msgs: list[tuple[MsgLevel, str]] = [("ok", f"[完成!] 视频: {out_path}")]
+    video_msgs: list[tuple[str, str]] = [("ok", f"[完成!] 视频: {out_path}")]
     if cfg.mode == "all" and cfg.ffmpeg_bin:
         extract = ff.extract_audio(out_path, cfg.audio_dir, cfg.ffmpeg_bin)
         video_msgs.extend(extract.messages)

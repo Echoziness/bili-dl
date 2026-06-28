@@ -97,15 +97,20 @@
 - **解法**：`DownloadConfig` dataclass 打包所有下载参数；`download(url, cfg)` 只需 2 个参数。加字段只改 dataclass，不破坏调用方。
 - **教训**：超过 4-5 个参数的函数是"参数对象"重构信号。dataclass 比 `**kwargs` 更安全（有类型、有默认值、IDE 可补全）。
 
-### 2.15 类型安全：MsgLevel Literal + mypy strict（v0.1.8）
-- **原则**：所有 `*Result.messages` 的 level 字段用 `MsgLevel = Literal["info","ok","warn","error"]` 标注（定义在 `config.py`）。`cli._EMITTERS` 用 `dict[MsgLevel, Callable[[str], None]]`。mypy strict 能在编译期捕获 level 拼写错误。
-- **mypy 配置**：`pyproject.toml [tool.mypy] strict=true, python_version="3.10"`。CI lint job + publish 前置都跑 `mypy src/bili_dl`。python_version 设 3.10（mypy 新版最低要求），3.9 兼容性靠 CI test 矩阵真机验证。
-- **教训**：字符串作"类型标签"是动态类型的隐性风险。Literal + mypy 能在不引入 Enum 运行时开销的前提下获得编译期安全。
-
-### 2.16 REPL EOFError 处理（v0.1.8）
+### 2.15 REPL EOFError 处理（v0.1.8）
 - **问题**：`ui.prompt` 用 `input()`，stdin 关闭/重定向（如 `echo "" | bili-dl`）时抛 `EOFError` 导致崩溃。
 - **解法**：`cli._repl` 的 prompt 调用包 `try/except EOFError: break`，干净退出返回 0。
 - **测试**：`test_main_repl_eof_exits_cleanly` mock `ui.prompt` 抛 `EOFError`，断言 `main([]) == 0`。
+
+### 2.16 最小化优先——"不能再少"而非"更多"（v0.1.9 回归 KISS）
+- **背景**：v0.1.6→v0.1.8 轨迹是"更多、更多、更多"——更多测试、更多类型、更多 CI 版本。受 Bryan Cantrill《The Peril of Laziness Lost》启发（LLM 工作成本为零，倾向于堆叠而非简化），v0.1.9 做减法。
+- **删除清单**：
+  - `MsgLevel = Literal["info","ok","warn","error"]`——4 个字符串值不值得类型系统重型机械。`_EMITTERS` 运行时 KeyError 就能捕获拼写错误。删后 5 个文件少一个 import。
+  - `NavProbeResult` dataclass——只在一个函数、一个调用者之间使用。降为 `tuple[Optional[dict], Optional[str]]` 返回，少 10 行。
+  - 25 个同义反复测试——测 Python 语言本身（dict 查找、dataclass 默认值、`==` 运算符）而非我们的代码。测试从 101 降到 76，覆盖率从 91% 降到 87%——删掉的都是零信号测试。
+  - CI Python 矩阵 3.9-3.13 五版本砍回 3.9+3.13 两版本——零依赖、无版本特定代码的 500 行包，中间版本不增加信号。
+- **判断标准**（Cantrill）：每次改动前问"这让系统更简单了，还是只是更大了？"默认答案是"不加"。验证到边际收益递减就停。
+- **教训**：S 级不是"更多"，是"不能再少"。最好的工程总是诞生于约束——人类的有限时间迫使开发清晰抽象，LLM 的零成本倾向于堆叠垃圾千层饼。
 
 ## 3. 项目结构
 
@@ -122,25 +127,25 @@ bili-dl/
 │   ├── __init__.py                # __version__（hatchling dynamic version 源）
 │   ├── __main__.py                # python -m bili_dl
 │   ├── cli.py                     # 控制器 + REPL + main() — 唯一展示层（ui.* 只在此调）
-│   ├── config.py                  # 纯常量 + MsgLevel 类型别名，无可变状态
+│   ├── config.py                  # 纯常量，无可变状态
 │   ├── paths.py                   # 跨平台路径（Win/macOS/Linux）
 │   ├── cookiesource.py            # Cookie 源文件检测 + 提取导入（纯逻辑，无 ui）
-│   ├── cookiestore.py             # Cookie 校验 + ensure_cookie 编排 + NavProbeResult（纯逻辑，无 ui）
+│   ├── cookiestore.py             # Cookie 校验 + ensure_cookie 编排（纯逻辑，无 ui）
 │   ├── ffmpeg.py                  # ffprobe/ffmpeg 探测 + 零损失重封装/提取（纯逻辑，无 ui）
 │   ├── downloader.py              # yt-dlp 两阶段下载 + DownloadConfig（纯逻辑，无 ui）
 │   └── ui.py                      # ANSI 彩色输出（Win10+ 启用 VT）
 ├── tests/
 │   ├── test_cookiesource.py       # 隐私核心测试（其他站点不泄漏）+ 导入逻辑
 │   ├── test_cookiestore.py        # 校验 + ensure_cookie + _nav_probe mock（网络/HTTP/成功）
-│   ├── test_downloader.py         # 参数拼装 + DownloadConfig + download() mock subprocess
+│   ├── test_downloader.py         # 参数拼装 + download() mock subprocess
 │   ├── test_ffmpeg.py             # repair/extract mock subprocess 全分支
 │   ├── test_cli.py                # argparse parser + main() mock 依赖检查
-│   ├── test_ui.py                 # _init/colorize TTY + ANSI + mode_label
+│   ├── test_ui.py                 # _init TTY + colorize ANSI
 │   ├── test_paths.py              # 跨平台路径分支（mock platform）
 │   ├── test_package.py            # 包导入冒烟测试
 │   └── data/sample_cookies_all.txt
 └── .github/workflows/
-    ├── ci.yml                     # lint(ruff+mypy) + test(3平台×5版本) + coverage
+    ├── ci.yml                     # lint(ruff+mypy) + test(3平台×2版本) + coverage
     └── publish.yml                # push v* tag → test 前置(ruff+mypy+pytest) → 自动发布 PyPI
 ```
 
@@ -217,6 +222,7 @@ uv run python -m build
 - [x] v0.1.6 已发布（2026-06-28）
 - [x] v0.1.7 已发布（2026-06-28）
 - [x] v0.1.8 已发布（2026-06-28）
+- [x] v0.1.9 已发布（2026-06-28）
 
 ### 发版流程（当前）
 > 任何一步不绿不得进入下一步。

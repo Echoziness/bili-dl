@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
-from .config import BILI_COOKIE_FILENAME, NAV_API, NAV_TIMEOUT, USER_AGENT, MsgLevel
+from .config import BILI_COOKIE_FILENAME, NAV_API, NAV_TIMEOUT, USER_AGENT
 from .cookiesource import find_source, import_cookie, read_lines
 from .paths import config_dir
 
@@ -31,7 +31,7 @@ class ValidationResult:
     """Outcome of a cookie validity check."""
 
     valid: bool
-    messages: list[tuple[MsgLevel, str]] = field(default_factory=list)
+    messages: list[tuple[str, str]] = field(default_factory=list)
     uname: Optional[str] = None
 
 
@@ -40,7 +40,7 @@ class EnsureResult:
     """Outcome of the full validate → import → re-validate flow."""
 
     ready: bool
-    messages: list[tuple[MsgLevel, str]] = field(default_factory=list)
+    messages: list[tuple[str, str]] = field(default_factory=list)
 
 
 def bili_cookie_path(cookie_dir: Optional[Path] = None) -> Path:
@@ -58,21 +58,12 @@ def _extract_sessdata(lines: list[str]) -> Optional[str]:
     return None
 
 
-@dataclass
-class NavProbeResult:
-    """Outcome of a nav API probe.
+def _nav_probe(sessdata: str) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+    """Probe the nav API; return ``(data, error)``.
 
-    ``data`` holds parsed JSON on success; ``None`` on error.
-    ``error`` is ``None`` on success; ``"network"`` for connection failures;
-    ``"http:{status}"`` for HTTP error responses (412/403 = 风控, 5xx = 服务端).
-    """
-
-    data: Optional[dict[str, Any]] = None
-    error: Optional[str] = None
-
-
-def _nav_probe(sessdata: str) -> NavProbeResult:
-    """Probe the nav API; return parsed JSON on success, error tag on failure.
+    On success *data* holds parsed JSON and *error* is ``None``.
+    On failure *data* is ``None`` and *error* is ``"network"`` (connection
+    failure) or ``"http:{status}"`` (HTTP error, e.g. 412 = 风控).
 
     HTTPError is caught separately from URLError so the caller can distinguish
     "B 站风控/接口异常" (HTTP 4xx/5xx) from "本机网络不通" (URLError) —
@@ -85,13 +76,11 @@ def _nav_probe(sessdata: str) -> NavProbeResult:
         )
         with urllib.request.urlopen(req, timeout=NAV_TIMEOUT) as resp:
             data: dict[str, Any] = json.loads(resp.read().decode("utf-8", errors="replace"))
-            return NavProbeResult(data=data)
+            return data, None
     except urllib.error.HTTPError as e:
-        return NavProbeResult(error=f"http:{e.code}")
-    except urllib.error.URLError:
-        return NavProbeResult(error="network")
-    except Exception:
-        return NavProbeResult(error="network")
+        return None, f"http:{e.code}"
+    except (urllib.error.URLError, OSError):
+        return None, "network"
 
 
 def validate(cookie_dir: Optional[Path] = None) -> ValidationResult:
@@ -118,14 +107,13 @@ def validate(cookie_dir: Optional[Path] = None) -> ValidationResult:
             messages=[("warn", "[提示] 未找到 SESSDATA（可能未登录，或 Cookie 已过期）")],
         )
 
-    probe = _nav_probe(sessdata)
-    if probe.data is None:
+    data, error = _nav_probe(sessdata)
+    if data is None:
         # Error path — degrade to local-only, but report the *real* cause
-        if probe.error == "network":
+        if error == "network":
             cause = "网络/SSL 错误"
-        elif probe.error is not None and probe.error.startswith("http:"):
-            status = probe.error[5:]
-            cause = f"B 站返回 HTTP {status}（可能被风控或接口变更）"
+        elif error is not None and error.startswith("http:"):
+            cause = f"B 站返回 HTTP {error[5:]}（可能被风控或接口变更）"
         else:
             cause = "未知错误"
         return ValidationResult(
@@ -135,8 +123,7 @@ def validate(cookie_dir: Optional[Path] = None) -> ValidationResult:
                 ("ok", "[OK] 本地格式校验通过"),
             ],
         )
-    # Success path — probe.data is not None
-    data = probe.data
+    # Success path — data is not None
     if data.get("code") == 0 and data.get("data", {}).get("isLogin"):
         uname = data.get("data", {}).get("uname", "?")
         return ValidationResult(
@@ -157,7 +144,7 @@ def ensure_cookie(cookie_dir: Optional[Path] = None) -> EnsureResult:
     This encapsulates the cookie-readiness flow so the controller calls one
     function instead of coordinating internal module details.
     """
-    msgs: list[tuple[MsgLevel, str]] = []
+    msgs: list[tuple[str, str]] = []
 
     result = validate(cookie_dir)
     if result.valid:

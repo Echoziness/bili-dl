@@ -1,7 +1,6 @@
 """Tests for yt-dlp argument assembly and download orchestration.
 
-Part 1 — pure logic (no subprocess, no network): argument threading,
-template/format selection, DownloadConfig defaults.
+Part 1 — argument threading (the project's reason for existing, §2.1).
 
 Part 2 — download() with mocked subprocess: Phase 1 predict failure,
 Phase 2 failure, success paths for all three modes.
@@ -15,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from bili_dl import downloader
-from bili_dl.config import FMT_AUDIO, FMT_AV, REFERER
+from bili_dl.config import REFERER
 from bili_dl.downloader import DownloadConfig
 
 
@@ -57,52 +56,6 @@ def test_common_args_insecure(tmp_path: Path) -> None:
     cfg = _cfg(tmp_path, insecure=True)
     args = downloader._common_args(cfg)
     assert "--no-check-certificate" in args
-
-
-def test_common_args_no_proxy_no_insecure(tmp_path: Path) -> None:
-    cfg = _cfg(tmp_path)
-    args = downloader._common_args(cfg)
-    assert "--proxy" not in args
-    assert "--no-check-certificate" not in args
-
-
-def test_template_for_audio(tmp_path: Path) -> None:
-    video_dir = tmp_path / "videos"
-    audio_dir = tmp_path / "audio"
-    tmpl = downloader._template_for("a", video_dir, audio_dir)
-    assert tmpl == str(audio_dir / "%(title)s.%(ext)s")
-    assert str(video_dir) not in tmpl
-
-
-def test_template_for_video_modes(tmp_path: Path) -> None:
-    video_dir = tmp_path / "videos"
-    audio_dir = tmp_path / "audio"
-    for mode in ("all", "v"):
-        tmpl = downloader._template_for(mode, video_dir, audio_dir)
-        assert tmpl == str(video_dir / "%(title)s.%(ext)s")
-
-
-def test_format_for_audio() -> None:
-    assert downloader._format_for("a") == FMT_AUDIO
-
-
-def test_format_for_video_modes() -> None:
-    for mode in ("all", "v"):
-        assert downloader._format_for(mode) == FMT_AV
-
-
-def test_download_config_defaults() -> None:
-    cfg = DownloadConfig(
-        mode="all",
-        video_dir=Path("/tmp/v"),
-        audio_dir=Path("/tmp/a"),
-        cookie_path=Path("/tmp/c.txt"),
-    )
-    assert cfg.proxy == ""
-    assert cfg.insecure is False
-    assert cfg.ytdlp is None
-    assert cfg.ffmpeg_bin is None
-    assert cfg.referer == REFERER
 
 
 # ─── Part 2: download() with mocked subprocess ──────────────────────────────

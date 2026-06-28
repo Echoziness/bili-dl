@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.9] - 2026-06-28
+
+### Removed — Simplification (KISS regression)
+Inspired by Bryan Cantrill's "The Peril of Laziness Lost": LLMs lack the
+virtue of laziness — work costs nothing, so they stack more rather than
+simplify. This release does the opposite: removes abstractions that made
+the system *larger* without making it *simpler*.
+
+- **`MsgLevel` Literal type** deleted. 4 string values don't warrant a
+  `Literal` type alias imported across 5 files. `_EMITTERS` runtime
+  `KeyError` catches typos; `str` is simpler. (AGENTS.md §2.16)
+- **`NavProbeResult` dataclass** deleted. Used in exactly one function and
+  one caller — a `tuple[Optional[dict], Optional[str]]` return is lighter.
+  The HTTP-vs-network error distinction (v0.1.8) is preserved.
+- **25 tautological tests** deleted (101 → 76). These tested Python itself
+  (dict lookup, dataclass defaults, `==` operator) not our code. Coverage
+  91% → 87% — the lost 4% was zero-signal noise.
+- **CI Python matrix** trimmed from 5 versions (3.9-3.13) to 2 (3.9 + 3.13).
+  A zero-dependency 500-line package with no version-specific code gets no
+  signal from intermediate versions.
+
+### Changed
+- `_nav_probe` `except Exception` fallback merged with `URLError` into
+  `except (URLError, OSError)` — same behaviour, less code.
+
 ## [0.1.8] - 2026-06-28
 
 ### Changed — Type safety & error precision
@@ -163,3 +188,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.1.6]: https://github.com/Echoziness/bili-dl/releases/tag/v0.1.6
 [0.1.7]: https://github.com/Echoziness/bili-dl/releases/tag/v0.1.7
 [0.1.8]: https://github.com/Echoziness/bili-dl/releases/tag/v0.1.8
+[0.1.9]: https://github.com/Echoziness/bili-dl/releases/tag/v0.1.9

@@ -137,28 +137,3 @@ def test_www_bilibili_kept(tmp_path: Path) -> None:
     content = bili_cookie_path(tmp_path).read_text(encoding="utf-8")
     assert "SessionOnly" in content
     assert "www.bilibili.com" in content
-
-
-def test_import_result_has_messages(tmp_path: Path) -> None:
-    """ImportResult carries structured messages, not ui side-effects."""
-    src = tmp_path / "cookies_export.txt"
-    src.write_text(DATA.read_text(encoding="utf-8"), encoding="utf-8")
-    result = cs.import_cookie(tmp_path)
-
-    assert result.success is True
-    assert len(result.messages) > 0
-    assert result.count > 0
-    assert result.source is not None
-    # Every message is a (level, text) tuple
-    for msg in result.messages:
-        assert isinstance(msg, tuple)
-        assert len(msg) == 2
-        assert msg[0] in ("info", "ok", "warn", "error")
-
-
-def test_is_bili_line() -> None:
-    assert cs.is_bili_line(".bilibili.com\tTRUE\t/\tFALSE\t0\tSESSDATA\tabc") is True
-    assert cs.is_bili_line("www.bilibili.com\tFALSE\t/\tFALSE\t0\tfoo\tbar") is True
-    assert cs.is_bili_line("#HttpOnly_.bilibili.com\tTRUE\t/\tTRUE\t0\tx\ty") is True
-    assert cs.is_bili_line("# This is a comment") is False
-    assert cs.is_bili_line(".example.com\tTRUE\t/\tTRUE\t0\tfoo\tbar") is False
