@@ -99,8 +99,15 @@ def error(text: str) -> None:
 
 
 def prompt(text: str) -> str:
-    """Read one line from stdin. Plain input() — portable across platforms."""
-    return input(text)
+    """Read one line from stdin; prompt text goes to stderr (clig.dev §Output).
+
+    The prompt string is written to stderr (it's messaging, not primary
+    output) so ``bili-dl | grep`` stays clean even in the REPL. ``input``
+    is called with an empty prompt to avoid it writing to stdout.
+    """
+    sys.stderr.write(text)
+    sys.stderr.flush()
+    return input("")
 
 
 def mode_label(mode: str) -> str:

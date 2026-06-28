@@ -113,6 +113,16 @@ def test_nav_probe_url_error(monkeypatch: pytest.MonkeyPatch) -> None:
     assert error == "network"
 
 
+def test_nav_probe_badjson(monkeypatch: pytest.MonkeyPatch) -> None:
+    """B站 returns HTML instead of JSON → 'badjson', not 'network' (§2.20)."""
+    body = b"<html><body>Server Error</body></html>"
+
+    monkeypatch.setattr(store.urllib.request, "urlopen", lambda req, timeout: _FakeResp(body))
+    data, error = store._nav_probe("sess")
+    assert data is None
+    assert error == "badjson"
+
+
 # ─── validate: mock _nav_probe to test message precision ────────────────────
 
 
@@ -153,3 +163,13 @@ def test_validate_degrades_on_http_error_with_status(
     result = store.validate(d)
     assert result.valid is True
     assert any("HTTP 412" in t for _, t in result.messages)
+
+
+def test_validate_degrades_on_badjson(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """B站 returns non-JSON → report 'non-JSON', not '网络/SSL' (§2.20)."""
+    d = _make_cookie_dir(tmp_path)
+    monkeypatch.setattr(store, "_nav_probe", lambda s: (None, "badjson"))
+    result = store.validate(d)
+    assert result.valid is True
+    assert any("非 JSON" in t for _, t in result.messages)
+    assert not any("网络" in t for _, t in result.messages)

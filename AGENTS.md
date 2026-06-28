@@ -109,7 +109,7 @@
   - `MsgLevel = Literal["info","ok","warn","error"]`——4 个字符串值不值得类型系统重型机械。`_EMITTERS` 运行时 KeyError 就能捕获拼写错误。删后 5 个文件少一个 import。
   - `NavProbeResult` dataclass——只在一个函数、一个调用者之间使用。降为 `tuple[Optional[dict], Optional[str]]` 返回，少 10 行。
   - 25 个同义反复测试——测 Python 语言本身（dict 查找、dataclass 默认值、`==` 运算符）而非我们的代码。测试从 101 降到 76，覆盖率从 91% 降到 87%——删掉的都是零信号测试。
-  - CI Python 矩阵 3.9-3.13 五版本砍回 3.9+3.13 两版本——零依赖、无版本特定代码的 500 行包，中间版本不增加信号。
+  - CI Python 矩阵 3.9-3.13 五版本砍回 3.9+3.13 两版本——零依赖、无版本特定代码的 500 行包，中间版本不增加信号。（v0.2.0 基线升 3.11 后矩阵为 3.11+3.13。）
 - **判断标准**（Cantrill）：每次改动前问"这让系统更简单了，还是只是更大了？"默认答案是"不加"。验证到边际收益递减就停。
 - **教训**：S 级不是"更多"，是"不能再少"。最好的工程总是诞生于约束——人类的有限时间迫使开发清晰抽象，LLM 的零成本倾向于堆叠垃圾千层饼。
 
@@ -155,7 +155,7 @@ bili-dl/
 ├── README.md                      # 宣传门面（务必随版本同步功能表）
 ├── CHANGELOG.md                   # Keep a Changelog 格式
 ├── LICENSE                        # MIT + 依赖合规说明
-├── .python-version                # pyenv/uv 用，固定 3.9（向下兼容基准）
+├── .python-version                # pyenv/uv 用，固定 3.11（v0.2.0 起基线）
 ├── .gitignore                     # 含 cookies_*.txt 与媒体文件，防泄密
 ├── AGENTS.md                      # 本文件
 ├── src/bili_dl/
@@ -211,7 +211,7 @@ bili-dl/
 
 ```bash
 # 开发安装 (uv 管理 venv + editable)
-uv venv --python 3.9 .venv
+uv venv --python 3.11 .venv
 uv pip install -e . ruff pytest
 
 # 检验
@@ -235,14 +235,9 @@ uv run python -m build
 
 ## 6. 环境特异事实（开发者备注）
 
-- **SteamTools MITM 拦截**：WSL 环境有 SteamTools 在本地做 HTTPS 中间人代理，`api.github.com` 证书 issuer 为 `CN=SteamTools Certificate`（非正规 CA）。影响：
+- **SteamTools MITM 拦截（历史，现已恢复）**：WSL 环境曾有 SteamTools 在本地做 HTTPS 中间人代理，`api.github.com` 证书 issuer 为 `CN=SteamTools Certificate`（非正规 CA），导致 `gh` CLI（Go TLS）不信任该 CA、所有 API 调用失败，当时用 `curl -k` 绕过。**现状：`gh` CLI 已可直接用于 GitHub API 操作**（创建 Release 等）。若将来 `gh` 再次报 TLS 错误，先查是否 SteamTools 重新拦截，再回退 `curl -k`。
   - `git clone/pull/push` 用 **SSH** 不受影响（已配 `ssh.github.com:443`）。
-  - `gh` CLI（Go TLS）不信任 SteamTools CA，所有 API 调用失败。**解法**：GitHub API 操作改用 `curl -k` 绕过证书校验。示例：
-    ```bash
-    curl -k -X POST https://api.github.com/repos/.../releases -H "Authorization: token $(gh auth token)" ...
-    ```
-  - `pip install bili-dl`（PyPI→GitHub 不走代理）需加 `--trusted-host pypi.org --trusted-host files.pythonhosted.org`。
-  - `git config --global http.sslVerify false` 对 `git` 本身有用，对 `gh`（Go）无效。
+  - `pip install bili-dl`（PyPI→GitHub 不走代理）如遇证书错误，加 `--trusted-host pypi.org --trusted-host files.pythonhosted.org`。
 - **PyPI 镜像延迟**：ustc/清华等国内镜像对新发布的版本有滞后（数小时到一天）。ci 自动发布后如需立刻验证安装，用官方 PyPI + `--trusted-host`。
 - **SSH 22 端口被封，走 443**：`git push` 实测 `ssh: connect to host github.com port 22: Connection refused`。解法：`git remote set-url origin ssh://git@ssh.github.com:443/Echoziness/bili-dl.git`，首次 push 用 `GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=accept-new"` 登记 `ssh.github.com:443` 的 host key（ED25519）。此 remote URL 已固化在本地仓库，后续 push 无需再处理。不改全局 config，避免影响其他仓库。
 - **PowerShell 编码**：PowerShell 调子进程时需注入 `chcp 65001` + UTF8，但纯 Python 跨平台版不涉及此（Python3 默认 UTF-8）。此条仅对 bd.ps1 维护有意义。
@@ -266,6 +261,7 @@ uv run python -m build
 - [x] v0.2.3 已发布（2026-06-28）
 - [x] v0.2.4 已发布（2026-06-28）
 - [x] v0.2.5 已发布（2026-06-28）
+- [x] v0.2.6 已发布（2026-06-28）
 
 ### 发版流程（当前）
 > 任何一步不绿不得进入下一步。
@@ -282,5 +278,5 @@ uv run python -m build
    - 若 format 报 `Would reformat`，先 `uv run ruff format src tests` 再提交。
 4. `git commit -m "release: vX.Y.Z"`
 5. `git tag -a vX.Y.Z -m "vX.Y.Z"` → push commit + tag
-6. 等 CI 全绿（lint[ruff+mypy] + test[3平台×5版本] + coverage + Publish 前置）确认无红色
-7. `curl -k` 调 GitHub API 创建 Release
+6. 等 CI 全绿（lint[ruff+mypy] + test[3平台×2版本] + coverage + Publish 前置）确认无红色
+7. `gh release create vX.Y.Z --title "vX.Y.Z" --notes "<从 CHANGELOG 取本版本段落>"` 创建 Release

@@ -95,6 +95,11 @@ def test_ok_prints_to_stderr(monkeypatch: pytest.MonkeyPatch, capsys: pytest.Cap
     assert "done" in captured.err
 
 
-def test_prompt_reads_stdin(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_prompt_reads_stdin(monkeypatch: pytest.MonkeyPatch, capsys: pytest.Capture) -> None:
     monkeypatch.setattr("builtins.input", lambda prompt: "user typed this")
     assert ui.prompt("> ") == "user typed this"
+    captured = capsys.readouterr()
+    # Prompt text must go to stderr, not stdout (clig.dev §Output) — keeps
+    # `bili-dl | grep` clean even in the REPL.
+    assert captured.out == ""
+    assert "> " in captured.err

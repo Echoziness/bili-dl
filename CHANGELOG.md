@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.6] - 2026-06-28
+
+### Fixed — Audit follow-up (11 issues)
+Comprehensive review identified 11 issues across code, tests, docs, and
+project metadata. All fixed in this release.
+
+**Code:**
+- `ui.prompt`: prompt text now goes to **stderr** (was stdout via `input`).
+  The prompt is messaging, not primary output — keeps `bili-dl | grep`
+  clean even in the REPL. (clig.dev §Output)
+- `cookiestore._nav_probe`: `JSONDecodeError` (B站 returns HTML instead of
+  JSON) now classified as `"badjson"`, not lumped into `"network"`.
+  `validate` reports "B 站返回非 JSON 内容（可能被风控或接口变更）" instead
+  of the misleading "网络/SSL 错误". (AGENTS.md §2.20)
+- `cookiesource.import_cookie`: removed duplicate directory glob. The
+  candidate scan logic is now in a shared `_candidates()` helper used by
+  both `find_source` and `import_cookie`; `import_cookie` no longer calls
+  `find_source` then re-globs.
+
+**Metadata:**
+- `pyproject.toml`: removed `Python :: 3.14` classifier (CI only tests
+  3.11 + 3.13 — declaring an untested version is misleading).
+
+**Docs:**
+- README: added **Limitations** section declaring `--no-playlist` (single
+  video only), sequential batch downloads, re-download overwrites, and the
+  Windows CJK filename trade-off.
+- AGENTS.md: synced stale descriptions — `.python-version` (3.9→3.11),
+  `uv venv` command (3.9→3.11), §2.16 CI matrix note (added v0.2.0
+  3.11+3.13 clarification), §7 release flow (`3平台×5版本`→`3平台×2版本`,
+  `curl -k`→`gh release create`).
+- AGENTS.md §6: updated SteamTools/MITM note — `gh` CLI is now usable
+  directly (curl -k workaround retired, history retained for recurrence).
+- CHANGELOG v0.2.4: fixed self-contradictory `--retries 10` wording.
+
+### Added
+- `uv.lock` committed for reproducible builds.
+- 2 new tests: `test_nav_probe_badjson`, `test_validate_degrades_on_badjson`.
+- `test_prompt_reads_stdin` now asserts prompt text goes to stderr.
+
 ## [0.2.5] - 2026-06-28
 
 ### Fixed
@@ -44,9 +84,9 @@ detail or degrades gracefully — no bare messages, no unhandled crashes.
 - `cookiesource.import_cookie`: `write_text` OSError caught
 
 **Download resilience:**
-- yt-dlp now gets `--retries 10` (was default 10 for fragments, but
-  the rename retry for .part files was default 3). More chances to
-  recover from transient WinError 32 file locking.
+- yt-dlp now gets `--retries 10` (explicit, ensuring both fragment and
+  .part-rename retries are at 10 rather than relying on defaults). More
+  chances to recover from transient WinError 32 file locking.
 
 ### Tests
 - `test_ffmpeg.py` rewritten: mocks `subprocess.run` (was `subprocess.call`),
@@ -320,3 +360,4 @@ the system *larger* without making it *simpler*.
 [0.2.3]: https://github.com/Echoziness/bili-dl/releases/tag/v0.2.3
 [0.2.4]: https://github.com/Echoziness/bili-dl/releases/tag/v0.2.4
 [0.2.5]: https://github.com/Echoziness/bili-dl/releases/tag/v0.2.5
+[0.2.6]: https://github.com/Echoziness/bili-dl/releases/tag/v0.2.6

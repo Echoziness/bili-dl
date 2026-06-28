@@ -62,13 +62,17 @@ def _nav_probe(sessdata: str) -> tuple[Optional[dict[str, Any]], Optional[str]]:
     """Probe the nav API; return ``(data, error)``.
 
     On success *data* holds parsed JSON and *error* is ``None``.
-    On failure *data* is ``None`` and *error* is ``"network"`` (connection
-    failure) or ``"http:{status}"`` (HTTP error, e.g. 412 = 风控).
+    On failure *data* is ``None`` and *error* is one of:
+    - ``"network"`` — connection failure (URLError/OSError)
+    - ``"http:{status}"`` — HTTP error, e.g. 412 = 风控
+    - ``"badjson"`` — server returned non-JSON body (风控/接口变更)
 
     HTTPError is caught separately from URLError so the caller can distinguish
     "B 站风控/接口异常" (HTTP 4xx/5xx) from "本机网络不通" (URLError) —
     previously both were swallowed by ``except Exception`` and reported as
     "网络/SSL 错误", masking the real cause (AGENTS.md §2.6).
+    JSONDecodeError is also separated: B站 may return an HTML error page
+    instead of JSON, which is not a network issue (AGENTS.md §2.20).
     """
     try:
         req = urllib.request.Request(
@@ -79,7 +83,9 @@ def _nav_probe(sessdata: str) -> tuple[Optional[dict[str, Any]], Optional[str]]:
             return data, None
     except urllib.error.HTTPError as e:
         return None, f"http:{e.code}"
-    except (urllib.error.URLError, OSError, json.JSONDecodeError):
+    except json.JSONDecodeError:
+        return None, "badjson"
+    except (urllib.error.URLError, OSError):
         return None, "network"
 
 
@@ -112,6 +118,8 @@ def validate(cookie_dir: Optional[Path] = None) -> ValidationResult:
         # Error path — degrade to local-only, but report the *real* cause
         if error == "network":
             cause = "网络/SSL 错误"
+        elif error == "badjson":
+            cause = "B 站返回非 JSON 内容（可能被风控或接口变更）"
         elif error is not None and error.startswith("http:"):
             cause = f"B 站返回 HTTP {error[5:]}（可能被风控或接口变更）"
         else:

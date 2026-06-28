@@ -147,6 +147,22 @@ bili-dl --batch-file urls.txt
 - `cookies_bilibili.txt` is created with a timestamped backup before any
   overwrite.
 
+## Limitations
+
+- **Single video only** — `--no-playlist` is always passed, so multi-P
+  videos, collections, and favourites are not downloaded as a batch. Give
+  each part's URL separately (or list them in a `--batch-file`).
+- **Batch downloads are sequential** — no concurrency. A long URL list takes
+  proportionally longer; this keeps memory low and avoids hammering Bilibili.
+- **Re-downloading overwrites** — no `--no-overwrites` / `--continue` is
+  passed to yt-dlp. Running the same URL twice re-downloads and replaces the
+  file.
+- **Windows CJK filenames** — on a stock Windows console (cp936/GBK) titles
+  containing rare characters or emoji may lose those characters in the saved
+  filename. Common Chinese characters are unaffected. This is a deliberate
+  trade-off for reliable path matching (see AGENTS.md §2.9); forcing UTF-8
+  would silently break downloads instead.
+
 ## License
 
 [MIT](LICENSE). `bili-dl` is a wrapper; the actual downloading is done by
