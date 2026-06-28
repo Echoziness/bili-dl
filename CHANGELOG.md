@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.8] - 2026-06-28
+
+### Changed — Type safety & error precision
+- **mypy strict enforced**: all source files pass `mypy --strict`. CI lint job
+  and publish prerequisite now run mypy. `pyproject.toml` `[tool.mypy]` set to
+  `strict=true, python_version="3.10"`.
+- **`MsgLevel` Literal type**: all `*Result.messages` levels are now
+  `Literal["info","ok","warn","error"]` (defined in `config.py`). `cli._EMITTERS`
+  typed as `dict[MsgLevel, Callable[[str], None]]`. Typos in message levels are
+  caught at type-check time.
+- **`_nav_probe` error classification** (AGENTS.md §2.6 follow-up): `except Exception`
+  replaced with separate `HTTPError` / `URLError` handlers. Returns
+  `NavProbeResult(data, error)` where error is `"network"` or `"http:{status}"`.
+  `validate` now reports "HTTP 412（可能被风控）" instead of the misleading
+  "网络/SSL 错误" when Bilibili returns an HTTP error.
+- **REPL EOFError handling**: `cli._repl` catches `EOFError` from `input()` so
+  `bili-dl` exits cleanly when stdin is closed/redirected.
+
+### Added — Test coverage (63% → 91%)
+- `tests/test_ffmpeg.py` (10 tests): mock subprocess for repair/extract branches.
+- `tests/test_ui.py` (14 tests): _init TTY/VT, colorize ANSI, mode_label.
+- `test_downloader.py` expanded (7 new): mock subprocess for download() Phase 1/2.
+- `test_cookiestore.py` expanded (8 new): mock urllib for _nav_probe
+  success/HTTP-error/URL-error; mock _nav_probe for validate message precision.
+- `test_cli.py` expanded (9 new): mock dependencies for main() flow, EOF exit.
+- Total: 101 tests (up from 53).
+
+### CI
+- Python matrix expanded: 3.9, 3.10, 3.11, 3.12, 3.13 (was 3.9, 3.13).
+- New `coverage` job: runs on ubuntu with `coverage report`.
+- `lint` job now runs `mypy src/bili_dl` in addition to ruff.
+- `publish.yml` test prerequisite now includes mypy.
+
 ## [0.1.7] - 2026-06-28
 
 ### Changed — Architecture refactoring
@@ -129,3 +162,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.1.5]: https://github.com/Echoziness/bili-dl/releases/tag/v0.1.5
 [0.1.6]: https://github.com/Echoziness/bili-dl/releases/tag/v0.1.6
 [0.1.7]: https://github.com/Echoziness/bili-dl/releases/tag/v0.1.7
+[0.1.8]: https://github.com/Echoziness/bili-dl/releases/tag/v0.1.8

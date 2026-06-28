@@ -15,16 +15,17 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
-      - run: pip install ruff
+      - run: pip install -e . ruff mypy
       - run: ruff check src tests
       - run: ruff format --check src tests
+      - run: mypy src/bili_dl
 
   test:
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.9", "3.13"]
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -34,3 +35,15 @@ jobs:
           cache: pip
       - run: pip install -e . pytest
       - run: pytest
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -e . pytest coverage
+      - run: coverage run -m pytest -q
+      - run: coverage report --include="src/bili_dl/*"

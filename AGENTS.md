@@ -8,7 +8,7 @@
 - **构建**：hatchling（`pyproject.toml` 声明，`src/` 布局，版本号动态读取 `__init__.py`）
 - **运行时依赖**：**零** —— 仅用标准库（`subprocess`、`urllib`、`pathlib`、`ctypes`、`argparse`、`json`、`shutil`）。
 - **外部程序依赖**：`yt-dlp`（必需，找不到则报错退出）、`ffmpeg`（可选，缺失则降级跳过音频提取/容器修复）。
-- **工具链**：ruff（lint+format）、pytest（测试）。无 mypy 强制。
+- **工具链**：ruff（lint+format）、mypy（strict 模式，CI 强制）、pytest（测试）+ coverage（CI 报告）。
 - **分发**：目标 PyPI，包名 `bili-dl`，脚本入口 `bili-dl`。
 
 ## 2. 已踩通的坑
@@ -48,7 +48,7 @@
 - **根因**：B 站 nav API 对 urllib 默认 UA `Python-urllib/3.x` 返回 **HTTP 412 Precondition Failed**（反爬）。`Invoke-RestMethod` 内部默认带 PowerShell/browser UA 故一直成功。代码的 `except Exception` 把 412 也吞进"网络/SSL 错误"分支，导致降级提示与真实根因描述不符——既误导用户也让 SSL 甩锅。
 - **解法**：`config.py::USER_AGENT` 放一个固定 Chrome UA 字符串；`cookiestore.py` 的 `_nav_probe()` urllib request header 加 `"User-Agent": USER_AGENT`。仅 nav 探测用，yt-dlp 下载阶段自带 UA。
 - **验证**：实跑 `bili-dl`（无 URL）开头即显示 `[OK] Cookie 有效 | 已登录: <uname>`。
-- **启示**：`except Exception` 太宽会把业务级 HTTP 错误（412/403/404）混进"网络问题"分支。后续若想精确分级，可在 `_online_check` 单独 catch `urllib.error.HTTPError` 拿 status，把 412/403 报为"被风控"而非"网络错误"。当前简单加 UA 已解。
+- **启示**：`except Exception` 太宽会把业务级 HTTP 错误（412/403/404）混进"网络问题"分支。**v0.1.8 已改**：`_nav_probe` 单独 catch `HTTPError` 拿 status，返回 `NavProbeResult(error="http:{status}")`；`validate` 据此报"HTTP 412（可能被风控）"而非笼统"网络/SSL 错误"。
 - **关联**：用户曾因 `-k` 也无效而怀疑证书；`-k` 只影响 yt-dlp 的 `--no-check-certificate`，**对 urllib 探测无影响**（urllib 默认就校验，且本机 CA 没问题）。下次有人误以为证书，先查 UA。
 - **v0.1.6 优化**：原先在线校验成功后又发一次完全相同的 nav 请求仅为拿 `uname`，现已合并为单次 `_nav_probe()` 调用，`isLogin` 和 `uname` 从同一响应提取。
 
@@ -97,6 +97,16 @@
 - **解法**：`DownloadConfig` dataclass 打包所有下载参数；`download(url, cfg)` 只需 2 个参数。加字段只改 dataclass，不破坏调用方。
 - **教训**：超过 4-5 个参数的函数是"参数对象"重构信号。dataclass 比 `**kwargs` 更安全（有类型、有默认值、IDE 可补全）。
 
+### 2.15 类型安全：MsgLevel Literal + mypy strict（v0.1.8）
+- **原则**：所有 `*Result.messages` 的 level 字段用 `MsgLevel = Literal["info","ok","warn","error"]` 标注（定义在 `config.py`）。`cli._EMITTERS` 用 `dict[MsgLevel, Callable[[str], None]]`。mypy strict 能在编译期捕获 level 拼写错误。
+- **mypy 配置**：`pyproject.toml [tool.mypy] strict=true, python_version="3.10"`。CI lint job + publish 前置都跑 `mypy src/bili_dl`。python_version 设 3.10（mypy 新版最低要求），3.9 兼容性靠 CI test 矩阵真机验证。
+- **教训**：字符串作"类型标签"是动态类型的隐性风险。Literal + mypy 能在不引入 Enum 运行时开销的前提下获得编译期安全。
+
+### 2.16 REPL EOFError 处理（v0.1.8）
+- **问题**：`ui.prompt` 用 `input()`，stdin 关闭/重定向（如 `echo "" | bili-dl`）时抛 `EOFError` 导致崩溃。
+- **解法**：`cli._repl` 的 prompt 调用包 `try/except EOFError: break`，干净退出返回 0。
+- **测试**：`test_main_repl_eof_exits_cleanly` mock `ui.prompt` 抛 `EOFError`，断言 `main([]) == 0`。
+
 ## 3. 项目结构
 
 ```
@@ -112,24 +122,26 @@ bili-dl/
 │   ├── __init__.py                # __version__（hatchling dynamic version 源）
 │   ├── __main__.py                # python -m bili_dl
 │   ├── cli.py                     # 控制器 + REPL + main() — 唯一展示层（ui.* 只在此调）
-│   ├── config.py                  # 纯常量，无可变状态
+│   ├── config.py                  # 纯常量 + MsgLevel 类型别名，无可变状态
 │   ├── paths.py                   # 跨平台路径（Win/macOS/Linux）
 │   ├── cookiesource.py            # Cookie 源文件检测 + 提取导入（纯逻辑，无 ui）
-│   ├── cookiestore.py             # Cookie 校验 + ensure_cookie 编排（纯逻辑，无 ui）
+│   ├── cookiestore.py             # Cookie 校验 + ensure_cookie 编排 + NavProbeResult（纯逻辑，无 ui）
 │   ├── ffmpeg.py                  # ffprobe/ffmpeg 探测 + 零损失重封装/提取（纯逻辑，无 ui）
 │   ├── downloader.py              # yt-dlp 两阶段下载 + DownloadConfig（纯逻辑，无 ui）
 │   └── ui.py                      # ANSI 彩色输出（Win10+ 启用 VT）
 ├── tests/
 │   ├── test_cookiesource.py       # 隐私核心测试（其他站点不泄漏）+ 导入逻辑
-│   ├── test_cookiestore.py        # 校验 + ensure_cookie 编排
-│   ├── test_downloader.py         # 参数拼装 + DownloadConfig + 模板选择
-│   ├── test_cli.py                # argparse parser 构建
+│   ├── test_cookiestore.py        # 校验 + ensure_cookie + _nav_probe mock（网络/HTTP/成功）
+│   ├── test_downloader.py         # 参数拼装 + DownloadConfig + download() mock subprocess
+│   ├── test_ffmpeg.py             # repair/extract mock subprocess 全分支
+│   ├── test_cli.py                # argparse parser + main() mock 依赖检查
+│   ├── test_ui.py                 # _init/colorize TTY + ANSI + mode_label
 │   ├── test_paths.py              # 跨平台路径分支（mock platform）
 │   ├── test_package.py            # 包导入冒烟测试
 │   └── data/sample_cookies_all.txt
 └── .github/workflows/
-    ├── ci.yml                     # Win/macOS/Linux × Py3.9/3.13 矩阵
-    └── publish.yml                # push v* tag → test 前置 → 自动构建并发布 PyPI
+    ├── ci.yml                     # lint(ruff+mypy) + test(3平台×5版本) + coverage
+    └── publish.yml                # push v* tag → test 前置(ruff+mypy+pytest) → 自动发布 PyPI
 ```
 
 ## 4. 关键约定
@@ -204,20 +216,22 @@ uv run python -m build
 - [x] v0.1.5 已发布（2026-06-28）
 - [x] v0.1.6 已发布（2026-06-28）
 - [x] v0.1.7 已发布（2026-06-28）
+- [x] v0.1.8 已发布（2026-06-28）
 
 ### 发版流程（当前）
 > 任何一步不绿不得进入下一步。
 
 1. 改版本号：仅 `src/bili_dl/__init__.py`（`pyproject.toml` 用 hatchling `dynamic = ["version"]` 自动读取）
 2. 写 CHANGELOG（Keep a Changelog 格式）
-3. 本地全量验证（**三项缺一不可**）：
+3. 本地全量验证（**四项缺一不可**）：
    ```bash
    uv run ruff check src tests        # 逻辑 lint
    uv run ruff format --check src tests  # 格式检查
-   uv run pytest                       # 单元测试
+   uv run mypy src/bili_dl            # 类型检查 (strict)
+   uv run pytest                      # 单元测试
    ```
    - 若 format 报 `Would reformat`，先 `uv run ruff format src tests` 再提交。
 4. `git commit -m "release: vX.Y.Z"`
 5. `git tag -a vX.Y.Z -m "vX.Y.Z"` → push commit + tag
-6. 等 CI 全绿（lint + test 矩阵 + Publish to PyPI 含 test 前置）确认无红色
+6. 等 CI 全绿（lint[ruff+mypy] + test[3平台×5版本] + coverage + Publish 前置）确认无红色
 7. `curl -k` 调 GitHub API 创建 Release

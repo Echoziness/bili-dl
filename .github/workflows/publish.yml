@@ -13,9 +13,10 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
-      - run: pip install -e . pytest ruff
+      - run: pip install -e . pytest ruff mypy
       - run: ruff check src tests
       - run: ruff format --check src tests
+      - run: mypy src/bili_dl
       - run: pytest
 
   publish:

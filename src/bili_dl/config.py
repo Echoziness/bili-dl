@@ -1,6 +1,13 @@
-"""Project-wide constants. No mutable state lives here."""
+"""Project-wide constants and type aliases. No mutable state lives here."""
 
 from __future__ import annotations
+
+from typing import Literal
+
+# Structured message level used by all *Result dataclasses. The controller
+# (cli.py) maps each level to a ui.* function via _EMITTERS. Using Literal
+# instead of bare str lets mypy catch typos at the call site.
+MsgLevel = Literal["info", "ok", "warn", "error"]
 
 # Bilibili endpoints
 NAV_API = "https://api.bilibili.com/x/web-interface/nav"

@@ -17,13 +17,14 @@ so the produced M4A has moov-first layout friendly to foobar2000 etc.
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
 from . import __version__, cookiestore, downloader, ui
 from . import ffmpeg as ff
-from .config import VALID_MODES
+from .config import VALID_MODES, MsgLevel
 from .downloader import DownloadConfig
 from .paths import config_dir, default_audio_dir, default_video_dir, ensure_dir
 
@@ -37,10 +38,15 @@ from .paths import config_dir, default_audio_dir, default_video_dir, ensure_dir
 # the hard way during initial bring-up.
 
 # ─── Presentation: map logic-module message levels to ui functions ─────────
-_EMITTERS = {"info": ui.info, "ok": ui.ok, "warn": ui.warn, "error": ui.error}
+_EMITTERS: dict[MsgLevel, Callable[[str], None]] = {
+    "info": ui.info,
+    "ok": ui.ok,
+    "warn": ui.warn,
+    "error": ui.error,
+}
 
 
-def _emit(messages: list[tuple[str, str]]) -> None:
+def _emit(messages: list[tuple[MsgLevel, str]]) -> None:
     """Print structured messages from logic modules via the appropriate ui function."""
     for level, text in messages:
         _EMITTERS[level](text)
@@ -171,7 +177,10 @@ def _repl(opts: Options, ytdlp: str, ffmpeg_bin: Optional[str]) -> int:
     print()
     while True:
         label = ui.mode_label(opts.mode)
-        raw = ui.prompt(f"输入 B 站链接 (模式:{label} | all/v/a 切换 | q 退出): ")
+        try:
+            raw = ui.prompt(f"输入 B 站链接 (模式:{label} | all/v/a 切换 | q 退出): ")
+        except EOFError:
+            break
         if not raw.strip():
             continue
         if raw.strip().lower() == "q":
