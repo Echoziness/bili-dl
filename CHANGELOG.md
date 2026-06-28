@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.8] - 2026-06-28
+
+### Fixed — Follow-up from third-party review
+
+- **Docstring priority**: `cli.py` module docstring now correctly states CLI >
+  config > env (matching the actual `_merge_settings` implementation and
+  AGENTS.md §2.17). Previously it claimed env took precedence over config,
+  which was the opposite of reality.
+- **Phase 1 exit-code alignment**: `downloader.py` Phase 1 (predict) no longer
+  fails when yt-dlp returns a non-zero exit code but stdout contains a valid
+  path — same "trust the artifact, not the exit code" philosophy as Phase 2
+  (§2.11). Returncode ≠ 0 now triggers a warning instead of abandoning the
+  download.
+- **AGENTS.md test count**: synced stale `159→158→159` after removing and
+  re-adding tests across two commits.
+
 ## [0.2.7] - 2026-06-28
 
 ### Fixed — Audit optimisation (A- → A)
