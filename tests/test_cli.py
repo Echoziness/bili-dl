@@ -82,7 +82,7 @@ def test_main_no_ffmpeg_warns(monkeypatch: pytest.MonkeyPatch, capsys: pytest.Ca
     monkeypatch.setattr(ff, "find_ffmpeg", lambda: None)
     monkeypatch.setattr(cli, "_prepare_cookie", lambda opts: False)
     assert cli.main([]) == 1
-    assert "ffmpeg" in capsys.readouterr().out
+    assert "ffmpeg" in capsys.readouterr().err
 
 
 def test_main_non_interactive_success(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -106,6 +106,7 @@ def test_main_repl_eof_exits_cleanly(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(downloader, "find_ytdlp", lambda: "yt-dlp")
     monkeypatch.setattr(ff, "find_ffmpeg", lambda: "ffmpeg")
     monkeypatch.setattr(cli, "_prepare_cookie", lambda opts: True)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
 
     def raise_eof(prompt: str) -> str:
         raise EOFError
@@ -226,9 +227,9 @@ def test_main_batch_download(
     monkeypatch.setattr(cli, "_run_once", lambda opts, url, ytdlp, ffmpeg_bin: True)
     result = cli.main(["--batch-file", str(batch_file)])
     assert result == 0
-    out = capsys.readouterr().out
-    assert "2 个链接" in out
-    assert "全部完成" in out
+    err = capsys.readouterr().err
+    assert "2 个链接" in err
+    assert "全部完成" in err
 
 
 def test_main_batch_partial_failure(
@@ -251,9 +252,9 @@ def test_main_batch_partial_failure(
     monkeypatch.setattr(cli, "_run_once", fake_run)
     result = cli.main(["--batch-file", str(batch_file)])
     assert result == 1
-    out = capsys.readouterr().out
-    assert "1 成功" in out
-    assert "1 失败" in out
+    err = capsys.readouterr().err
+    assert "1 成功" in err
+    assert "1 失败" in err
 
 
 def test_main_batch_empty_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -263,3 +264,93 @@ def test_main_batch_empty_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
     monkeypatch.setattr(ff, "find_ffmpeg", lambda: "ffmpeg")
     monkeypatch.setattr(cli, "_prepare_cookie", lambda opts: True)
     assert cli.main(["--batch-file", str(batch_file)]) == 0
+
+
+# ─── clig.dev compliance: stdin TTY + env vars + no-color ───────────────────
+
+
+def test_main_non_tty_no_url_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Non-interactive stdin + no URL → error, not REPL (clig.dev §Interactivity)."""
+    monkeypatch.setattr(downloader, "find_ytdlp", lambda: "yt-dlp")
+    monkeypatch.setattr(ff, "find_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr(cli, "_prepare_cookie", lambda opts: True)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    assert cli.main([]) == 1
+
+
+def test_main_tty_no_url_enters_repl(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Interactive stdin (TTY) + no URL → REPL."""
+    monkeypatch.setattr(downloader, "find_ytdlp", lambda: "yt-dlp")
+    monkeypatch.setattr(ff, "find_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr(cli, "_prepare_cookie", lambda opts: True)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+
+    def raise_eof(prompt: str) -> str:
+        raise EOFError
+
+    monkeypatch.setattr("bili_dl.ui.prompt", raise_eof)
+    assert cli.main([]) == 0
+
+
+def test_merge_proxy_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """HTTPS_PROXY env var fills in proxy when CLI and config don't."""
+    monkeypatch.setenv("HTTPS_PROXY", "http://env:9999")
+    monkeypatch.delenv("HTTP_PROXY", raising=False)
+    args = _build_parser().parse_args([])
+    opts = cli._merge_settings(args, settings.Settings())
+    assert opts.proxy == "http://env:9999"
+
+
+def test_merge_proxy_cli_overrides_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """CLI --proxy takes precedence over env var."""
+    monkeypatch.setenv("HTTPS_PROXY", "http://env:9999")
+    args = _build_parser().parse_args(["--proxy", "http://cli:8080"])
+    opts = cli._merge_settings(args, settings.Settings())
+    assert opts.proxy == "http://cli:8080"
+
+
+def test_merge_proxy_config_overrides_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Config file proxy takes precedence over env var."""
+    monkeypatch.setenv("HTTPS_PROXY", "http://env:9999")
+    args = _build_parser().parse_args([])
+    cfg = settings.Settings(proxy="http://cfg:7890")
+    opts = cli._merge_settings(args, cfg)
+    assert opts.proxy == "http://cfg:7890"
+
+
+def test_main_no_color_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    """--no-color calls ui.disable_color()."""
+    monkeypatch.setattr(downloader, "find_ytdlp", lambda: "yt-dlp")
+    monkeypatch.setattr(ff, "find_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr(cli, "_prepare_cookie", lambda opts: True)
+    called = [False]
+
+    def fake_disable() -> None:
+        called[0] = True
+
+    monkeypatch.setattr("bili_dl.ui.disable_color", fake_disable)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("bili_dl.ui.prompt", lambda p: "q")
+    cli.main(["--no-color"])
+    assert called[0] is True
+
+
+def test_help_has_examples_and_url() -> None:
+    """--help text includes examples and issues link (clig.dev §Help)."""
+    parser = _build_parser()
+    help_text = parser.format_help()
+    assert "examples:" in help_text.lower() or "example" in help_text.lower()
+    assert "github.com/Echoziness/bili-dl" in help_text
+
+
+def test_main_no_ffmpeg_warns_to_stderr(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.Capture
+) -> None:
+    """Warning messages go to stderr, not stdout (clig.dev: messaging to stderr)."""
+    monkeypatch.setattr(downloader, "find_ytdlp", lambda: "yt-dlp")
+    monkeypatch.setattr(ff, "find_ffmpeg", lambda: None)
+    monkeypatch.setattr(cli, "_prepare_cookie", lambda opts: False)
+    cli.main([])
+    captured = capsys.readouterr()
+    assert "ffmpeg" in captured.err  # stderr, not stdout
+    assert "ffmpeg" not in captured.out

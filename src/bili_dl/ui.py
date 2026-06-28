@@ -2,12 +2,20 @@
 
 Zero-dependency. On Windows 10+ we enable ENABLE_VIRTUAL_TERMINAL_PROCESSING
 so ANSI escape codes work in conhost/Windows Terminal; older Windows and all
-POSIX terminals already support ANSI. Falls back to plain text if enabling
-fails or when stdout is redirected (not a TTY).
+POSIX terminals already support ANSI. Falls back to plain text when:
+- stdout is not a TTY (piped/redirected)
+- ``NO_COLOR`` env var is set and non-empty (no-color.org standard)
+- ``TERM`` is ``dumb``
+- ``--no-color`` was passed (set via :func:`disable_color`)
+
+All output goes to **stderr** — the terminal messages are never the primary
+output (files on disk are). This keeps ``bili-dl URL | grep`` clean.
+(clig.dev: "Send messaging to stderr.")
 """
 
 from __future__ import annotations
 
+import os
 import sys
 from typing import Final
 
@@ -22,6 +30,15 @@ _COLORS: Final = {
 
 _enabled = False
 _initialized = False
+_user_disabled = False
+
+
+def disable_color() -> None:
+    """Explicitly disable color (e.g. via ``--no-color`` flag)."""
+    global _user_disabled, _enabled, _initialized
+    _user_disabled = True
+    _enabled = False
+    _initialized = True
 
 
 def _init() -> None:
@@ -29,14 +46,24 @@ def _init() -> None:
     if _initialized:
         return
     _initialized = True
-    if not sys.stdout.isatty():
+    # User explicitly disabled via --no-color
+    if _user_disabled:
+        return
+    # no-color.org standard: NO_COLOR set (any non-empty value) disables color
+    if os.environ.get("NO_COLOR"):
+        return
+    # TERM=dumb means the terminal can't do ANSI
+    if os.environ.get("TERM") == "dumb":
+        return
+    # Check stderr TTY (we write to stderr, not stdout)
+    if not sys.stderr.isatty():
         return
     if sys.platform == "win32":
         try:
             import ctypes
 
             kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined, unused-ignore]
-            handle = kernel32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE
+            handle = kernel32.GetStdHandle(-12)  # STD_ERROR_HANDLE
             mode = ctypes.c_uint32()
             if kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
                 # ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004
@@ -56,19 +83,19 @@ def _colorize(text: str, color: str) -> str:
 
 
 def info(text: str) -> None:
-    print(text)
+    print(text, file=sys.stderr)
 
 
 def ok(text: str) -> None:
-    print(_colorize(text, "green"))
+    print(_colorize(text, "green"), file=sys.stderr)
 
 
 def warn(text: str) -> None:
-    print(_colorize(text, "yellow"))
+    print(_colorize(text, "yellow"), file=sys.stderr)
 
 
 def error(text: str) -> None:
-    print(_colorize(text, "red"))
+    print(_colorize(text, "red"), file=sys.stderr)
 
 
 def prompt(text: str) -> str:

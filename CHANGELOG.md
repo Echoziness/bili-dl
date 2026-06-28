@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-06-28
+
+### Changed — clig.dev compliance (essential rules)
+Audited against [clig.dev](https://clig.dev/) and fixed 4 essential violations.
+
+- **stdout/stderr separation**: all terminal messages now go to `stderr`
+  (`ui.*` uses `print(..., file=sys.stderr)`). The primary output is files
+  on disk; all text is messaging. `bili-dl URL | grep` is now clean.
+- **`NO_COLOR` env var**: `ui._init()` checks `NO_COLOR` (non-empty) and
+  `TERM=dumb` to disable colors (no-color.org standard).
+- **`--no-color` flag**: explicit `ui.disable_color()` before any output.
+- **stdin TTY guard**: if `stdin` is not a TTY and no URL is given, error
+  out instead of entering REPL (clig.dev §Interactivity).
+- **`HTTP_PROXY`/`HTTPS_PROXY` env vars**: proxy precedence is now
+  CLI `--proxy` > config `proxy` > `HTTPS_PROXY` > `HTTP_PROXY` > empty.
+- **help text**: added 4 examples + GitHub issues link (clig.dev §Help).
+
+### Added
+- 8 new tests (103 total): stdin TTY guard, env var proxy fallback,
+  `--no-color` flag, help text validation, stderr assertion.
+
 ## [0.2.0] - 2026-06-28
 
 ### Added — Two feature modules
@@ -217,3 +238,4 @@ the system *larger* without making it *simpler*.
 [0.1.8]: https://github.com/Echoziness/bili-dl/releases/tag/v0.1.8
 [0.1.9]: https://github.com/Echoziness/bili-dl/releases/tag/v0.1.9
 [0.2.0]: https://github.com/Echoziness/bili-dl/releases/tag/v0.2.0
+[0.2.1]: https://github.com/Echoziness/bili-dl/releases/tag/v0.2.1

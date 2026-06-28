@@ -5,10 +5,11 @@ This is the **controller / presentation layer** — the only module that calls
 settings) return result objects with structured messages; this module
 translates them into terminal output via :func:`_emit`.
 
-Configuration precedence (highest to lowest):
+Configuration precedence (highest to lowest, per clig.dev §Configuration):
   1. CLI flags (``--proxy``, ``-a``, etc.)
-  2. ``config.toml`` in the config directory (or ``--config`` path)
-  3. Built-in defaults
+  2. Environment variables (``HTTP_PROXY``, ``NO_COLOR``)
+  3. ``config.toml`` in the config directory (or ``--config`` path)
+  4. Built-in defaults
 
 Modes:
   all — video+audio (DASH, merged to MP4) + extract independent M4A
@@ -19,6 +20,8 @@ Modes:
 from __future__ import annotations
 
 import argparse
+import os
+import sys
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -64,11 +67,23 @@ class Options:
     audio_dir: Optional[Path] = None
 
 
+_HELP_EPILOG = """\
+examples:
+  bili-dl https://www.bilibili.com/video/BV...     # video + audio (default)
+  bili-dl -a https://www.bilibili.com/video/BV...  # audio only (M4A)
+  bili-dl --batch-file urls.txt                    # batch download
+  bili-dl                                          # interactive REPL
+
+report issues: https://github.com/Echoziness/bili-dl/issues\
+"""
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="bili-dl",
         description="Cross-platform Bilibili downloader (yt-dlp + ffmpeg wrapper).",
-        epilog="Run with no URL for an interactive REPL; type `q` to quit.",
+        epilog=_HELP_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     mode = p.add_mutually_exclusive_group()
     mode.add_argument(
@@ -106,10 +121,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="skip TLS certificate verification (special environments only)",
     )
     p.add_argument(
+        "--no-color",
+        action="store_true",
+        help="disable colored output (also disabled by NO_COLOR env var or non-TTY)",
+    )
+    p.add_argument(
         "--proxy",
         default=None,
         metavar="URL",
-        help="proxy URL for yt-dlp (e.g. http://127.0.0.1:7890)",
+        help="proxy URL for yt-dlp (env: HTTP_PROXY, HTTPS_PROXY)",
     )
     p.add_argument(
         "--cookie-dir",
@@ -162,11 +182,21 @@ def _load_settings(config_path: Optional[Path]) -> settings.Settings:
 
 
 def _merge_settings(args: argparse.Namespace, cfg: settings.Settings) -> Options:
-    """Merge config file settings with CLI args. CLI flags take precedence."""
+    """Merge config + env vars with CLI args.
+
+    Precedence: CLI flags > env vars > config file > defaults.
+    (clig.dev §Configuration)
+    """
     mode = args.mode or cfg.mode or "all"
+
+    # Proxy: CLI flag > config > HTTP_PROXY/HTTPS_PROXY env (clig.dev standard)
+    proxy = args.proxy if args.proxy is not None else cfg.proxy
+    if proxy is None:
+        proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or ""
+
     return Options(
         mode=mode if mode in VALID_MODES else "all",
-        proxy=args.proxy if args.proxy is not None else (cfg.proxy or ""),
+        proxy=proxy,
         insecure=args.insecure if args.insecure is not None else (cfg.insecure or False),
         cookie_dir=args.cookie_dir or cfg.cookie_dir,
         video_dir=args.output_dir or cfg.video_dir,
@@ -198,12 +228,12 @@ def _prepare_cookie(opts: Options) -> bool:
         return True
 
     base_dir = opts.cookie_dir or config_dir()
-    print()
+    print(file=sys.stderr)
     ui.error("[失败] 没有可用的 B 站 Cookie。")
     ui.warn("  请先在浏览器登录 bilibili.com，然后导出 Cookie（Netscape 格式），")
     ui.warn(f"  将导出的 .txt 文件放入以下目录：{base_dir}")
     ui.warn("  支持任意文件名，只要文件包含 bilibili 条目即可自动识别。")
-    print()
+    print(file=sys.stderr)
     return False
 
 
@@ -230,11 +260,11 @@ def _batch_download(opts: Options, urls: list[str], ytdlp: str, ffmpeg_bin: Opti
     ui.info(f"[批量] 共 {total} 个链接")
     failures = 0
     for i, url in enumerate(urls, 1):
-        print()
+        print(file=sys.stderr)
         ui.info(f"[批量] ({i}/{total}) {url}")
         if not _run_once(opts, url, ytdlp, ffmpeg_bin):
             failures += 1
-    print()
+    print(file=sys.stderr)
     if failures:
         ui.warn(f"[批量] 完成: {total - failures} 成功, {failures} 失败")
     else:
@@ -243,8 +273,8 @@ def _batch_download(opts: Options, urls: list[str], ytdlp: str, ffmpeg_bin: Opti
 
 
 def _repl(opts: Options, ytdlp: str, ffmpeg_bin: Optional[str]) -> int:
-    print(f"使用: {ytdlp}")
-    print()
+    print(f"使用: {ytdlp}", file=sys.stderr)
+    print(file=sys.stderr)
     while True:
         label = ui.mode_label(opts.mode)
         try:
@@ -257,14 +287,14 @@ def _repl(opts: Options, ytdlp: str, ffmpeg_bin: Optional[str]) -> int:
             break
         if raw.strip().lower() in VALID_MODES:
             opts.mode = raw.strip().lower()
-            print()
+            print(file=sys.stderr)
             ui.info(f"[模式] {ui.mode_label(opts.mode)}")
-            print()
+            print(file=sys.stderr)
             continue
-        print()
+        print(file=sys.stderr)
         _run_once(opts, raw.strip(), ytdlp, ffmpeg_bin)
-        print()
-    print()
+        print(file=sys.stderr)
+    print(file=sys.stderr)
     ui.info("再见!")
     return 0
 
@@ -273,7 +303,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
-    # Load config file, merge with CLI args (CLI takes precedence) ----------
+    # Handle --no-color before anything else (clig.dev §Output) --------------
+    if args.no_color:
+        ui.disable_color()
+
+    # Load config file, merge with CLI args + env vars (CLI > env > config) --
     cfg = _load_settings(args.config)
     opts = _merge_settings(args, cfg)
 
@@ -290,7 +324,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     ensure_dir(opts.audio_dir or default_audio_dir())
 
     ui.info("B 站视频下载工具")
-    print()
+    print(file=sys.stderr)
 
     if not _prepare_cookie(opts):
         return 1
@@ -306,18 +340,25 @@ def main(argv: Optional[list[str]] = None) -> int:
             return 0
         ui.info(f"使用: {ytdlp}")
         ui.info(f"模式: {ui.mode_label(opts.mode)} | 批量文件: {args.batch_file}")
-        print()
+        print(file=sys.stderr)
         return _batch_download(opts, urls, ytdlp, ffmpeg_bin)
 
     # Non-interactive mode: one URL then exit --------------------------------
     if args.url:
         ui.info(f"使用: {ytdlp}")
         ui.info(f"模式: {ui.mode_label(opts.mode)} | URL: {args.url}")
-        print()
+        print(file=sys.stderr)
         ok = _run_once(opts, args.url, ytdlp, ffmpeg_bin)
-        print()
+        print(file=sys.stderr)
         ui.info("再见!")
         return 0 if ok else 1
+
+    # No URL and no batch file: REPL only if stdin is a TTY ------------------
+    # (clig.dev §Interactivity: "Only use prompts if stdin is a TTY")
+    if not sys.stdin.isatty():
+        ui.error("[错误] 非交互模式需要提供 URL 或 --batch-file 参数")
+        ui.info("用法: bili-dl <URL>  或  bili-dl --batch-file <FILE>")
+        return 1
 
     return _repl(opts, ytdlp, ffmpeg_bin)
 

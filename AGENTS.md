@@ -112,14 +112,24 @@
 - **判断标准**（Cantrill）：每次改动前问"这让系统更简单了，还是只是更大了？"默认答案是"不加"。验证到边际收益递减就停。
 - **教训**：S 级不是"更多"，是"不能再少"。最好的工程总是诞生于约束——人类的有限时间迫使开发清晰抽象，LLM 的零成本倾向于堆叠垃圾千层饼。
 
-### 2.17 TOML 配置文件化（v0.2.0）
+### 2.17 clig.dev 合规——消息流/环境变量/交互（v0.2.1）
+- **审查依据**：[clig.dev](https://clig.dev/)（Docker Compose 作者编撰的 CLI 设计指南）
+- **stdout/stderr 分离**：所有终端消息输出改到 `stderr`（`ui.info/ok/warn/error` 用 `print(..., file=sys.stderr)`）。主要输出是磁盘上的文件，所有终端文字都是 messaging。`bili-dl URL | grep` 现在干净无日志污染。
+- **`NO_COLOR` 环境变量**：`ui._init()` 检查 `NO_COLOR` 非空即禁用颜色。符合 [no-color.org](https://no-color.org/) 标准。
+- **`TERM=dumb`**：`ui._init()` 检查 `TERM=dumb` 即禁用颜色。
+- **`--no-color` flag**：显式禁用颜色，`cli.main()` 在解析后立即调 `ui.disable_color()`。
+- **stdin TTY 检查**：无 URL 且 stdin 非 TTY 时，报错"非交互模式需要提供 URL"并返回 1，不进 REPL。clig.dev §Interactivity："Only use prompts if stdin is a TTY"。
+- **`HTTP_PROXY`/`HTTPS_PROXY` 环境变量**：`_merge_settings()` 代理优先级链：CLI `--proxy` > config.toml `proxy` > `HTTPS_PROXY` > `HTTP_PROXY` > 空。clig.dev §Configuration："Check HTTP_PROXY, HTTPS_PROXY... if you're going to perform network operations"
+- **help 文本加示例和 issue 链接**：`--help` 显示 4 个示例 + GitHub issues URL。clig.dev §Help："Lead with examples" + "Provide a support path"
+
+### 2.18 TOML 配置文件化（v0.2.0）
 - **选型**：用 TOML 而非 INI/JSON/YAML——TOML 是 Python 生态标准（PEP 518/621），`tomllib` 3.11 入 stdlib，零依赖约束保持。
 - **版本基线提升**：`requires-python` 从 3.9 提到 3.11。3.9 发布于 2020，2026 年提 3.11 合理。CI 矩阵同步改为 3.11 + 3.13。
 - **配置优先级**：CLI 参数 > `config.toml` > 内置默认值。CLI 参数用 `default=None` 区分"未指定"和"显式传空"，`_merge_settings()` 据此决定是否用配置值。
 - **文件位置**：`config_dir() / config.toml`，与 cookie 同目录。`--config FILE` 可覆盖路径。
 - **模块**：`src/bili_dl/settings.py`——`Settings` dataclass + `load(path)` 函数。纯逻辑，返回 Settings 对象，无 ui 调用。
 
-### 2.18 批量下载（v0.2.0）
+### 2.19 批量下载（v0.2.0）
 - **接口**：`--batch-file FILE`，读取文本文件，每行一个 URL，`#` 开头为注释，空行跳过。
 - **实现**：`cli._read_batch_urls()` 解析文件 → `cli._batch_download()` 顺序下载并统计成功/失败数。
 - **返回码**：全部成功返回 0，任一失败返回 1。空文件返回 0（无 URL 不是错误）。
@@ -146,7 +156,7 @@ bili-dl/
 │   ├── cookiestore.py             # Cookie 校验 + ensure_cookie 编排（纯逻辑，无 ui）
 │   ├── ffmpeg.py                  # ffprobe/ffmpeg 探测 + 零损失重封装/提取（纯逻辑，无 ui）
 │   ├── downloader.py              # yt-dlp 两阶段下载 + DownloadConfig（纯逻辑，无 ui）
-│   └── ui.py                      # ANSI 彩色输出（Win10+ 启用 VT）
+│   ├── ui.py                      # ANSI 彩色输出到 stderr（clig.dev 合规）+ NO_COLOR/TTY 检查
 ├── tests/
 │   ├── test_cookiesource.py       # 隐私核心测试（其他站点不泄漏）+ 导入逻辑
 │   ├── test_cookiestore.py        # 校验 + ensure_cookie + _nav_probe mock（网络/HTTP/成功）
@@ -238,6 +248,7 @@ uv run python -m build
 - [x] v0.1.8 已发布（2026-06-28）
 - [x] v0.1.9 已发布（2026-06-28）
 - [x] v0.2.0 已发布（2026-06-28）
+- [x] v0.2.1 已发布（2026-06-28）
 
 ### 发版流程（当前）
 > 任何一步不绿不得进入下一步。

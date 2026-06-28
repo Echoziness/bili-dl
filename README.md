@@ -131,7 +131,8 @@ bili-dl --batch-file urls.txt
 | `-v`, `--video` | video only (MP4) |
 | `-a`, `--audio` | audio only (M4A, faststart ISOM) |
 | `-k`, `--insecure` | skip TLS certificate verification |
-| `--proxy URL` | proxy for yt-dlp |
+| `--proxy URL` | proxy for yt-dlp (env: `HTTPS_PROXY`/`HTTP_PROXY`) |
+| `--no-color` | disable colored output (also: `NO_COLOR` env var) |
 | `--config FILE` | override config file path |
 | `--batch-file FILE` | download URLs listed in a text file |
 | `-V`, `--version` | show version |
