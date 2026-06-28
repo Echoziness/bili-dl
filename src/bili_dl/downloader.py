@@ -139,7 +139,7 @@ def download(url: str, cfg: DownloadConfig) -> DownloadResult:
     if not out_path.exists():
         return DownloadResult(
             success=False,
-            messages=[("error", "[失败]")],
+            messages=[("error", "[失败] 下载未完成 — 请查看上方 yt-dlp 输出获取详细错误信息")],
         )
 
     # Post-processing ---------------------------------------------------------

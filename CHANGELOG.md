@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] - 2026-06-28
+
+### Fixed — Error message UX
+Phase 2 failure message changed from bare `[失败]` to
+`[失败] 下载未完成 — 请查看上方 yt-dlp 输出获取详细错误信息`.
+A bare `[失败]` with no context is hostile UX (clig.dev §Errors:
+"Catch errors and rewrite them for humans"). yt-dlp's error output
+scrolls by above; the new message directs the user to look there.
+
 ## [0.2.2] - 2026-06-28
 
 ### Fixed — Phase 2 returncode regression (friend's machine bug)
@@ -260,3 +269,4 @@ the system *larger* without making it *simpler*.
 [0.2.0]: https://github.com/Echoziness/bili-dl/releases/tag/v0.2.0
 [0.2.1]: https://github.com/Echoziness/bili-dl/releases/tag/v0.2.1
 [0.2.2]: https://github.com/Echoziness/bili-dl/releases/tag/v0.2.2
+[0.2.3]: https://github.com/Echoziness/bili-dl/releases/tag/v0.2.3
