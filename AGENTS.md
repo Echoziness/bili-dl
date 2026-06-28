@@ -75,10 +75,11 @@
 - **实测**：`bili-dl -V` → `bili-dl 0.1.0`；`bili-dl --version` 同效；`bili-dl -v <url>` 仍仅视频模式。
 - **教训**：CLI 短选项是稀缺资源（26 字母），命名时优先排雷 `-V/--version`、`-v/--verbose`、`-h/--help` 这类高频占用。本工具占用清单：`-a/-v` 模式、`-k` insecure、`-V` version、`-h` help。
 
-### 2.11 Phase 2 下载须检查 returncode（半文件误报成功）
-- **现象**：原实现仅靠 `out_path.exists()` 判断下载是否成功，忽略 yt-dlp 的退出码。若 yt-dlp 中途崩溃但已写入半个文件，`exists()` 返回 True，误报 `[完成!]`。
-- **解法**：`downloader.py` Phase 2 的 `subprocess.run` 结果检查 `returncode != 0 or not out_path.exists()`，两者任一为真即报失败。
-- **位置**：`src/bili_dl/downloader.py::download()` Phase 2 段。
+### 2.11 Phase 2 下载 returncode 检查——文件优先，退出码警告（v0.2.2 修正）
+- **现象（v0.1.8 引入的 bug）**：Phase 2 用 `returncode != 0 or not out_path.exists()` 判断失败。yt-dlp 在很多场景下返回非零退出码（警告/合并警告/版本差异），但文件已完整写盘。用户看到 `[失败]` 但文件实际可用。
+- **根因**：把 yt-dlp 给人类消费的退出码当作程序级成败信号。yt-dlp 的退出码粒度不足以区分"真失败"和"警告"。
+- **解法（v0.2.2 修正）**：Phase 2 只检查 `not out_path.exists()` —— **文件不存在 = 失败；文件存在 = 成功**。`returncode != 0` 时追加 `[警告]` 消息（告知用户 yt-dlp 有意见），但不报失败、不阻断后处理流程。Phase 1 predict 保持不变（无文件可查，必须看 returncode + stdout）。
+- **教训**：外部程序的退出码不是可靠的成功/失败信号。程序的"真实产出"（文件/网络请求结果）才是。检查产出存在性 > 信任退出码。
 
 ### 2.12 分层架构：逻辑层与展示层分离（v0.1.7 重构）
 - **原则**：逻辑模块（`cookiesource`/`cookiestore`/`ffmpeg`/`downloader`）只返回结构化结果（`*Result` dataclass + `messages: list[tuple[str, str]]`），**绝不直接调 `ui.*`**。控制器（`cli.py`）是唯一的展示层，通过 `_emit()` 将 `messages` 映射到 `ui.info/ok/warn/error`。
@@ -249,6 +250,7 @@ uv run python -m build
 - [x] v0.1.9 已发布（2026-06-28）
 - [x] v0.2.0 已发布（2026-06-28）
 - [x] v0.2.1 已发布（2026-06-28）
+- [x] v0.2.2 已发布（2026-06-28）
 
 ### 发版流程（当前）
 > 任何一步不绿不得进入下一步。

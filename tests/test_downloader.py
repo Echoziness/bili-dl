@@ -118,6 +118,37 @@ def test_download_phase2_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     assert result.success is False
 
 
+def test_download_phase2_nonzero_but_file_exists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """yt-dlp returns non-zero but writes the file → warn, not fail (§2.11 bugfix)."""
+    monkeypatch.setattr(downloader, "find_ytdlp", lambda: "yt-dlp")
+    out_file = tmp_path / "v" / "title.mp4"
+    calls = [0]
+
+    def fake_run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        calls[0] += 1
+        if calls[0] == 1:
+            return _completed_process(args, 0, stdout=str(out_file))
+        # phase 2: return non-zero, but create the file (yt-dlp warning scenario)
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+        out_file.write_bytes(b"\x00")
+        return _completed_process(args, 1)
+
+    monkeypatch.setattr(downloader.subprocess, "run", fake_run)
+    cfg = DownloadConfig(
+        mode="v",
+        video_dir=tmp_path / "v",
+        audio_dir=tmp_path / "a",
+        cookie_path=tmp_path / "c.txt",
+        ytdlp="yt-dlp",
+        ffmpeg_bin=None,
+    )
+    result = downloader.download("https://bilibili.com/video/BV1", cfg)
+    assert result.success is True
+    assert any("退出码" in t for _, t in result.messages)
+
+
 def test_download_video_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(downloader, "find_ytdlp", lambda: "yt-dlp")
     out_file = tmp_path / "v" / "title.mp4"

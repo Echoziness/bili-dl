@@ -136,7 +136,7 @@ def download(url: str, cfg: DownloadConfig) -> DownloadResult:
     # Phase 2: real download (inherit stdout/stderr for the progress bar) ----
     result = subprocess.run([ytdlp, *common, "-f", fmt, *merge, "-o", tmpl, url])
 
-    if result.returncode != 0 or not out_path.exists():
+    if not out_path.exists():
         return DownloadResult(
             success=False,
             messages=[("error", "[失败]")],
@@ -145,6 +145,10 @@ def download(url: str, cfg: DownloadConfig) -> DownloadResult:
     # Post-processing ---------------------------------------------------------
     if cfg.mode == "a":
         msgs: list[tuple[str, str]] = [("ok", f"[完成!] 音频: {out_path}")]
+        if result.returncode != 0:
+            msgs.insert(
+                0, ("warn", f"[警告] yt-dlp 退出码 {result.returncode}（非零，但文件已生成）")
+            )
         if cfg.ffmpeg_bin:
             repair = ff.repair_audio_container(out_path, cfg.ffmpeg_bin)
             msgs.extend(repair.messages)
@@ -154,6 +158,10 @@ def download(url: str, cfg: DownloadConfig) -> DownloadResult:
 
     # mode == "all" or "v" — video path
     video_msgs: list[tuple[str, str]] = [("ok", f"[完成!] 视频: {out_path}")]
+    if result.returncode != 0:
+        video_msgs.insert(
+            0, ("warn", f"[警告] yt-dlp 退出码 {result.returncode}（非零，但文件已生成）")
+        )
     if cfg.mode == "all" and cfg.ffmpeg_bin:
         extract = ff.extract_audio(out_path, cfg.audio_dir, cfg.ffmpeg_bin)
         video_msgs.extend(extract.messages)

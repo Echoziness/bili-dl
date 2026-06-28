@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-06-28
+
+### Fixed — Phase 2 returncode regression (friend's machine bug)
+v0.1.8 introduced `returncode != 0` as a Phase 2 failure condition. yt-dlp
+returns non-zero exit codes for warnings (merge warnings, version diffs,
+transient issues) even when the file is written correctly. This caused `[失败]`
+on some machines where yt-dlp's exit behaviour differs — the download actually
+succeeded but was reported as failure with no detail.
+
+Fix: Phase 2 now only checks `not out_path.exists()`. File exists = success.
+Non-zero returncode appends a `[警告]` message but does not block the download
+or post-processing. The file is the ground truth; exit codes are advisory.
+
+Phase 1 predict is unchanged (there's no file to check, so returncode +
+stdout are needed). (AGENTS.md §2.11 updated.)
+
+### Added
+- `test_download_phase2_nonzero_but_file_exists`: returncode≠0 + file exists
+  → success with warning. (104 tests total.)
+
 ## [0.2.1] - 2026-06-28
 
 ### Changed — clig.dev compliance (essential rules)
@@ -239,3 +259,4 @@ the system *larger* without making it *simpler*.
 [0.1.9]: https://github.com/Echoziness/bili-dl/releases/tag/v0.1.9
 [0.2.0]: https://github.com/Echoziness/bili-dl/releases/tag/v0.2.0
 [0.2.1]: https://github.com/Echoziness/bili-dl/releases/tag/v0.2.1
+[0.2.2]: https://github.com/Echoziness/bili-dl/releases/tag/v0.2.2
