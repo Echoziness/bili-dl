@@ -34,8 +34,9 @@
 ### 2.4 Cookie 隐私模型（核心不变量）
 - **过滤规则**：用 `"bilibili" in line` 匹配，保留所有 B 站域名行（含 `.bilibili.com` 和 `www.bilibili.com`）；其他站点 Cookie 不解析、不存储、不外发。这是项目隐私承诺，任何 PR 不得破坏。
 - **源文件自动检测**（v0.1.5 起）：扫描 cookie 目录下任意 `.txt` 文件（排除输出文件 `cookies_bilibili.txt`），第一个含 bilibili 条目的即用作源。不再要求特定文件名 `cookies_all.txt`，旧文件名仍透明兼容。
-- 位置：`src/bili_dl/cookies.py` 的 `import_bili_cookie()` + `_find_src_cookie()`。
-- 测试锚定：`tests/test_cookies.py` 的 `test_extract_drops_other_sites()` 断言 `other_secret` 不泄漏；`test_www_bilibili_kept()` 断言 `www.bilibili.com` 行被保留；`test_any_txt_filename_detected()` 断言任意文件名可识别。
+- **模块拆分**（v0.1.7 起）：原 `cookies.py` 拆为 `cookiesource.py`（检测 + 导入）和 `cookiestore.py`（产物路径 + 校验 + `ensure_cookie` 编排）。依赖方向：`cookiestore → cookiesource`（单向）。
+- 位置：`src/bili_dl/cookiesource.py` 的 `import_cookie()` + `find_source()`；`src/bili_dl/cookiestore.py` 的 `validate()` + `ensure_cookie()`。
+- 测试锚定：`tests/test_cookiesource.py` 的 `test_extract_drops_other_sites()` 断言 `other_secret` 不泄漏；`test_www_bilibili_kept()` 断言 `www.bilibili.com` 行被保留；`test_any_txt_filename_detected()` 断言任意文件名可识别；`tests/test_cookiestore.py` 的 `test_ensure_cookie_*()` 验证编排流程。
 
 ### 2.5 nav API 在线校验的降级策略
 - **现象**：在线校验 Cookie 需调 `https://api.bilibili.com/x/web-interface/nav`，但网络/SSL 错误时不能因此阻断下载（本地格式可能仍有效）。
@@ -45,7 +46,7 @@
 ### 2.6 nav API 必须伪装浏览器 User-Agent（412 根因，非 SSL）
 - **现象**：Python 版上线后实测每次都走降级（"无法在线验证 Cookie ... 降级为本地格式校验"），而原 bd.ps1 PowerShell 的 `Invoke-RestMethod` 一直能成功显示已登录用户名。曾被误判为本机证书链问题。
 - **根因**：B 站 nav API 对 urllib 默认 UA `Python-urllib/3.x` 返回 **HTTP 412 Precondition Failed**（反爬）。`Invoke-RestMethod` 内部默认带 PowerShell/browser UA 故一直成功。代码的 `except Exception` 把 412 也吞进"网络/SSL 错误"分支，导致降级提示与真实根因描述不符——既误导用户也让 SSL 甩锅。
-- **解法**：`config.py::USER_AGENT` 放一个固定 Chrome UA 字符串；`cookies.py` 的两处 `urllib.request.Request` header 都加 `"User-Agent": USER_AGENT`。仅 nav 探测用，yt-dlp 下载阶段自带 UA。
+- **解法**：`config.py::USER_AGENT` 放一个固定 Chrome UA 字符串；`cookiestore.py` 的 `_nav_probe()` urllib request header 加 `"User-Agent": USER_AGENT`。仅 nav 探测用，yt-dlp 下载阶段自带 UA。
 - **验证**：实跑 `bili-dl`（无 URL）开头即显示 `[OK] Cookie 有效 | 已登录: <uname>`。
 - **启示**：`except Exception` 太宽会把业务级 HTTP 错误（412/403/404）混进"网络问题"分支。后续若想精确分级，可在 `_online_check` 单独 catch `urllib.error.HTTPError` 拿 status，把 412/403 报为"被风控"而非"网络错误"。当前简单加 UA 已解。
 - **关联**：用户曾因 `-k` 也无效而怀疑证书；`-k` 只影响 yt-dlp 的 `--no-check-certificate`，**对 urllib 探测无影响**（urllib 默认就校验，且本机 CA 没问题）。下次有人误以为证书，先查 UA。
@@ -79,6 +80,23 @@
 - **解法**：`downloader.py` Phase 2 的 `subprocess.run` 结果检查 `returncode != 0 or not out_path.exists()`，两者任一为真即报失败。
 - **位置**：`src/bili_dl/downloader.py::download()` Phase 2 段。
 
+### 2.12 分层架构：逻辑层与展示层分离（v0.1.7 重构）
+- **原则**：逻辑模块（`cookiesource`/`cookiestore`/`ffmpeg`/`downloader`）只返回结构化结果（`*Result` dataclass + `messages: list[tuple[str, str]]`），**绝不直接调 `ui.*`**。控制器（`cli.py`）是唯一的展示层，通过 `_emit()` 将 `messages` 映射到 `ui.info/ok/warn/error`。
+- **收益**：逻辑模块变为纯函数（无 stdout 副作用），可在测试中调用不产生终端噪音；展示逻辑集中一处可统一修改；逻辑模块理论上可被非 CLI 消费者复用（如 GUI、库）。
+- **代价**：约 +60 行映射代码（Result dataclass + `_emit`）；每个 Result 需定义 dataclass。
+- **教训**：CLI 工具的"逻辑层打 print"是常见的隐性耦合。分离后 `pytest` 输出干净无垃圾——这是可观测的验证。
+- **位置**：`cli.py::_emit()` + `cli.py::_EMITTERS` 字典；各逻辑模块的 `*Result` 返回类型。
+
+### 2.13 `ensure_cookie` 封装领域编排（v0.1.7 重构）
+- **问题**：原 `cli.py::_prepare_cookie` 直接协调 `test_cookie_valid → import_bili_cookie → test_cookie_valid`，控制器知道了 cookie 模块内部的协作细节（校验失败要导入、导入后要再校验）。
+- **解法**：`cookiestore.ensure_cookie()` 封装"校验→导入→再校验"为单个领域操作。cli 只调一次，不关心内部步骤。
+- **教训**：控制器编排"做什么"，领域模块编排"怎么做"。当控制器开始知道领域内部的步骤顺序时，编排逻辑就泄漏了。
+
+### 2.14 `DownloadConfig` 参数对象化（v0.1.7 重构）
+- **问题**：`download()` 有 11 个 keyword-only 参数，调用站点冗长，加字段需改所有调用方签名。
+- **解法**：`DownloadConfig` dataclass 打包所有下载参数；`download(url, cfg)` 只需 2 个参数。加字段只改 dataclass，不破坏调用方。
+- **教训**：超过 4-5 个参数的函数是"参数对象"重构信号。dataclass 比 `**kwargs` 更安全（有类型、有默认值、IDE 可补全）。
+
 ## 3. 项目结构
 
 ```
@@ -91,31 +109,36 @@ bili-dl/
 ├── .gitignore                     # 含 cookies_*.txt 与媒体文件，防泄密
 ├── AGENTS.md                      # 本文件
 ├── src/bili_dl/
-│   ├── __init__.py                # __version__
+│   ├── __init__.py                # __version__（hatchling dynamic version 源）
 │   ├── __main__.py                # python -m bili_dl
-│   ├── cli.py                     # argparse + REPL + main()（主入口）
+│   ├── cli.py                     # 控制器 + REPL + main() — 唯一展示层（ui.* 只在此调）
 │   ├── config.py                  # 纯常量，无可变状态
 │   ├── paths.py                   # 跨平台路径（Win/macOS/Linux）
-│   ├── cookies.py                 # 自动检测 + Netscape 提取 + 在线/本地校验
-│   ├── ffmpeg.py                  # ffprobe/ffmpeg 探测 + 零损失重封装/提取
-│   ├── downloader.py              # yt-dlp 两阶段下载（预测路径 → 实下）
+│   ├── cookiesource.py            # Cookie 源文件检测 + 提取导入（纯逻辑，无 ui）
+│   ├── cookiestore.py             # Cookie 校验 + ensure_cookie 编排（纯逻辑，无 ui）
+│   ├── ffmpeg.py                  # ffprobe/ffmpeg 探测 + 零损失重封装/提取（纯逻辑，无 ui）
+│   ├── downloader.py              # yt-dlp 两阶段下载 + DownloadConfig（纯逻辑，无 ui）
 │   └── ui.py                      # ANSI 彩色输出（Win10+ 启用 VT）
 ├── tests/
-│   ├── test_cookies.py            # 隐私核心测试（其他站点不泄漏）
+│   ├── test_cookiesource.py       # 隐私核心测试（其他站点不泄漏）+ 导入逻辑
+│   ├── test_cookiestore.py        # 校验 + ensure_cookie 编排
+│   ├── test_downloader.py         # 参数拼装 + DownloadConfig + 模板选择
+│   ├── test_cli.py                # argparse parser 构建
 │   ├── test_paths.py              # 跨平台路径分支（mock platform）
 │   ├── test_package.py            # 包导入冒烟测试
 │   └── data/sample_cookies_all.txt
 └── .github/workflows/
     ├── ci.yml                     # Win/macOS/Linux × Py3.9/3.13 矩阵
-    └── publish.yml                # push v* tag → 自动构建并发布 PyPI
+    └── publish.yml                # push v* tag → test 前置 → 自动构建并发布 PyPI
 ```
 
 ## 4. 关键约定
 
 ### 4.1 依赖方向
-`cli → downloader → ffmpeg`；`cli → cookies`；`cli → paths → config`；`ffmpeg/downloader → ui/config`。
+`cli → cookiestore → cookiesource`；`cli → downloader → ffmpeg`；`cli → paths → config`；`cookiestore/cookiesource/ffmpeg/downloader → config`。
 - `config` 是叶节点（只导出常量），任何模块可依赖它，它不依赖任何内部模块。
 - `ui` 也接近叶节点（仅 `mode_label` 懒导入 `config`）。
+- **`ui` 只被 `cli.py` 依赖**（v0.1.7 起分层架构，逻辑模块不直接调 `ui.*`）。
 - 禁止反向依赖或循环导入。
 
 ### 4.2 零运行时依赖（硬约束）
@@ -128,7 +151,7 @@ bili-dl/
 
 ### 4.4 提交规范
 - Conventional Commits 中文风格可接受（项目面向中文用户为主），但英文 commit 便于国际贡献者，建议英文。
-- 任何改动到 cookies.py / ffmpeg.py 者必须跑 `tests/test_cookies.py` / 相关测试，不得破坏隐私断言。
+- 任何改动到 cookiesource.py / cookiestore.py / ffmpeg.py 者必须跑对应测试，不得破坏隐私断言。
 
 ## 5. 常用命令
 
@@ -180,6 +203,7 @@ uv run python -m build
 - [x] v0.1.4 已发布（2026-06-28）
 - [x] v0.1.5 已发布（2026-06-28）
 - [x] v0.1.6 已发布（2026-06-28）
+- [x] v0.1.7 已发布（2026-06-28）
 
 ### 发版流程（当前）
 > 任何一步不绿不得进入下一步。

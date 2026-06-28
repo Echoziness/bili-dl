@@ -1,5 +1,10 @@
 """Command-line interface and interactive REPL for bili-dl.
 
+This is the **controller / presentation layer** — the only module that calls
+``ui.*``. All logic modules (cookiesource, cookiestore, ffmpeg, downloader)
+return result objects with structured messages; this module translates them
+into terminal output via :func:`_emit`.
+
 Modes (mirror the original bd.ps1):
   all — video+audio (DASH, merged to MP4) + extract independent M4A
   v   — video only (single-file MP4 when such a stream exists)
@@ -16,9 +21,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from . import __version__, cookies, downloader, ui
+from . import __version__, cookiestore, downloader, ui
 from . import ffmpeg as ff
-from .config import REFERER, VALID_MODES
+from .config import VALID_MODES
+from .downloader import DownloadConfig
 from .paths import config_dir, default_audio_dir, default_video_dir, ensure_dir
 
 # Encoding policy: we deliberately do NOT force UTF-8 on stdio nor set
@@ -29,6 +35,15 @@ from .paths import config_dir, default_audio_dir, default_video_dir, ensure_dir
 # stays reliable for CJK titles. Forcing UTF-8 here would mismatch yt-dlp's
 # cp936 output and silently break downloads of any non-ASCII title — verified
 # the hard way during initial bring-up.
+
+# ─── Presentation: map logic-module message levels to ui functions ─────────
+_EMITTERS = {"info": ui.info, "ok": ui.ok, "warn": ui.warn, "error": ui.error}
+
+
+def _emit(messages: list[tuple[str, str]]) -> None:
+    """Print structured messages from logic modules via the appropriate ui function."""
+    for level, text in messages:
+        _EMITTERS[level](text)
 
 
 @dataclass
@@ -113,12 +128,15 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _prepare_cookie(opts: Options) -> bool:
-    """Ensure a valid Bilibili cookie is available; import from all if needed."""
-    cookie_ok = cookies.test_cookie_valid(opts.cookie_dir)
-    if not cookie_ok:
-        if cookies.import_bili_cookie(opts.cookie_dir):
-            cookie_ok = cookies.test_cookie_valid(opts.cookie_dir)
-    if cookie_ok:
+    """Ensure a valid Bilibili cookie is available.
+
+    Delegates the validate → import → re-validate flow to
+    :func:`cookiestore.ensure_cookie` (one call, no internal coordination
+    leaking into the controller). On failure, prints a help block.
+    """
+    result = cookiestore.ensure_cookie(opts.cookie_dir)
+    _emit(result.messages)
+    if result.ready:
         return True
 
     base_dir = opts.cookie_dir or config_dir()
@@ -132,18 +150,20 @@ def _prepare_cookie(opts: Options) -> bool:
 
 
 def _run_once(opts: Options, url: str, ytdlp: str, ffmpeg_bin: Optional[str]) -> bool:
-    return downloader.download(
-        url,
-        opts.mode,
+    """Execute one download and emit results. Returns success."""
+    cfg = DownloadConfig(
+        mode=opts.mode,
         video_dir=opts.video_dir or default_video_dir(),
         audio_dir=opts.audio_dir or default_audio_dir(),
-        cookie_path=cookies.bili_cookie_path(opts.cookie_dir),
-        referer=REFERER,
+        cookie_path=cookiestore.bili_cookie_path(opts.cookie_dir),
         proxy=opts.proxy,
         insecure=opts.insecure,
         ytdlp=ytdlp,
         ffmpeg_bin=ffmpeg_bin,
     )
+    result = downloader.download(url, cfg)
+    _emit(result.messages)
+    return result.success
 
 
 def _repl(opts: Options, ytdlp: str, ffmpeg_bin: Optional[str]) -> int:

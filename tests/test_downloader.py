@@ -10,54 +10,53 @@ from __future__ import annotations
 from pathlib import Path
 
 from bili_dl import downloader
-from bili_dl.config import FMT_AUDIO, FMT_AV
+from bili_dl.config import FMT_AUDIO, FMT_AV, REFERER
+from bili_dl.downloader import DownloadConfig
+
+
+def _cfg(
+    tmp_path: Path,
+    proxy: str = "",
+    insecure: bool = False,
+) -> DownloadConfig:
+    return DownloadConfig(
+        mode="all",
+        video_dir=tmp_path / "videos",
+        audio_dir=tmp_path / "audio",
+        cookie_path=tmp_path / "cookies.txt",
+        proxy=proxy,
+        insecure=insecure,
+    )
 
 
 def test_common_args_basic(tmp_path: Path) -> None:
-    cookie = tmp_path / "cookies.txt"
-    args = downloader._common_args(
-        cookie_path=cookie,
-        referer="https://www.bilibili.com",
-        proxy="",
-        insecure=False,
-    )
+    cfg = _cfg(tmp_path)
+    args = downloader._common_args(cfg)
     assert "--no-playlist" in args
     idx = args.index("--cookies")
-    assert args[idx + 1] == str(cookie)
+    assert args[idx + 1] == str(cfg.cookie_path)
     idx = args.index("--add-header")
-    assert args[idx + 1] == "Referer:https://www.bilibili.com"
+    assert args[idx + 1] == f"Referer:{REFERER}"
     assert "--proxy" not in args
     assert "--no-check-certificate" not in args
 
 
 def test_common_args_proxy(tmp_path: Path) -> None:
-    args = downloader._common_args(
-        cookie_path=tmp_path / "cookies.txt",
-        referer="https://www.bilibili.com",
-        proxy="http://127.0.0.1:7890",
-        insecure=False,
-    )
+    cfg = _cfg(tmp_path, proxy="http://127.0.0.1:7890")
+    args = downloader._common_args(cfg)
     idx = args.index("--proxy")
     assert args[idx + 1] == "http://127.0.0.1:7890"
 
 
 def test_common_args_insecure(tmp_path: Path) -> None:
-    args = downloader._common_args(
-        cookie_path=tmp_path / "cookies.txt",
-        referer="https://www.bilibili.com",
-        proxy="",
-        insecure=True,
-    )
+    cfg = _cfg(tmp_path, insecure=True)
+    args = downloader._common_args(cfg)
     assert "--no-check-certificate" in args
 
 
 def test_common_args_no_proxy_no_insecure(tmp_path: Path) -> None:
-    args = downloader._common_args(
-        cookie_path=tmp_path / "cookies.txt",
-        referer="https://www.bilibili.com",
-        proxy="",
-        insecure=False,
-    )
+    cfg = _cfg(tmp_path)
+    args = downloader._common_args(cfg)
     assert "--proxy" not in args
     assert "--no-check-certificate" not in args
 
@@ -85,3 +84,17 @@ def test_format_for_audio() -> None:
 def test_format_for_video_modes() -> None:
     for mode in ("all", "v"):
         assert downloader._format_for(mode) == FMT_AV
+
+
+def test_download_config_defaults() -> None:
+    cfg = DownloadConfig(
+        mode="all",
+        video_dir=Path("/tmp/v"),
+        audio_dir=Path("/tmp/a"),
+        cookie_path=Path("/tmp/c.txt"),
+    )
+    assert cfg.proxy == ""
+    assert cfg.insecure is False
+    assert cfg.ytdlp is None
+    assert cfg.ffmpeg_bin is None
+    assert cfg.referer == REFERER

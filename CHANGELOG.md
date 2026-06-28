@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.7] - 2026-06-28
+
+### Changed — Architecture refactoring
+- **Layered separation**: logic modules (`cookiesource`, `cookiestore`, `ffmpeg`,
+  `downloader`) no longer call `ui.*` directly. They return `*Result` dataclass
+  objects with structured `messages: list[tuple[str, str]]`. The controller
+  (`cli.py`) is the sole presentation layer, mapping messages to colored output
+  via `_emit()`.
+- **Module split**: `cookies.py` split into `cookiesource.py` (source detection
+  + import) and `cookiestore.py` (validation + `ensure_cookie` orchestration).
+  Each module now has a single responsibility.
+- **Domain encapsulation**: `cookiestore.ensure_cookie()` encapsulates the
+  validate → import → re-validate flow. `cli.py` calls one function instead of
+  coordinating internal module details.
+- **Parameter object**: `download()` reduced from 11 keyword args to
+  `download(url, cfg: DownloadConfig)`. New fields can be added to
+  `DownloadConfig` without breaking call sites.
+
+### Added
+- `tests/test_cookiesource.py` (12 tests) + `tests/test_cookiestore.py` (7 tests)
+  replacing `test_cookies.py`.
+- `test_downloader.py` updated for `DownloadConfig` interface (9 tests).
+- Total test count: 53 (up from 43).
+
+### Removed
+- `cookies.py` (split into `cookiesource.py` + `cookiestore.py`).
+- `test_cookies.py` (split into `test_cookiesource.py` + `test_cookiestore.py`).
+- Dead code: `suspect_cookie_files()` and `find_ffprobe()` (never called).
+
 ## [0.1.6] - 2026-06-28
 
 ### Changed
@@ -99,3 +128,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.1.4]: https://github.com/Echoziness/bili-dl/releases/tag/v0.1.4
 [0.1.5]: https://github.com/Echoziness/bili-dl/releases/tag/v0.1.5
 [0.1.6]: https://github.com/Echoziness/bili-dl/releases/tag/v0.1.6
+[0.1.7]: https://github.com/Echoziness/bili-dl/releases/tag/v0.1.7
