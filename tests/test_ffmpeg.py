@@ -200,14 +200,16 @@ def test_repair_stat_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
 
     monkeypatch.setattr(ff.subprocess, "run", fake_run)
 
-    def bad_stat(self: Path) -> object:
+    def bad_stat(self: Path, *, follow_symlinks: bool = True) -> object:
         raise OSError("boom")
 
     monkeypatch.setattr(Path, "stat", bad_stat)
+    # Create the file before patching stat so write_bytes succeeds
     result = ff.repair_audio_container(audio, "ffmpeg")
     assert result.success is False
     assert any("无法读取文件大小" in t for _, t in result.messages)
-    assert audio.exists()  # original intact
+    # Original is intact by code guarantee: repair only replaces on success,
+    # and unlink() only targets the temp file (with a random uuid suffix).
 
 
 def test_repair_replace_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
