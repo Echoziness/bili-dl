@@ -173,3 +173,81 @@ def test_validate_degrades_on_badjson(tmp_path: Path, monkeypatch: pytest.Monkey
     assert result.valid is True
     assert any("非 JSON" in t for _, t in result.messages)
     assert not any("网络" in t for _, t in result.messages)
+
+
+# ─── _extract_sessdata: precise field matching (§2.6 hardening) ──────────────
+
+
+def test_extract_sessdata_www_domain(tmp_path: Path) -> None:
+    """www.bilibili.com domain contains 'bilibili.com' → SESSDATA extracted."""
+    lines = ["www.bilibili.com\tFALSE\t/\tFALSE\t0\tSESSDATA\twww_sess"]
+    assert store._extract_sessdata(lines) == "www_sess"
+
+
+def test_extract_sessdata_other_domain_dropped() -> None:
+    """A SESSDATA-named cookie on a non-bilibili domain must not be returned."""
+    lines = [".example.com\tTRUE\t/\tFALSE\t0\tSESSDATA\tevil"]
+    assert store._extract_sessdata(lines) is None
+
+
+def test_extract_sessdata_wrong_name() -> None:
+    """A bilibili line whose name column is not 'SESSDATA' is skipped."""
+    lines = [".bilibili.com\tTRUE\t/\tFALSE\t0\tother_cookie\tval"]
+    assert store._extract_sessdata(lines) is None
+
+
+def test_extract_sessdata_short_line() -> None:
+    """Lines with fewer than 7 fields can't carry a value → None."""
+    lines = [".bilibili.com\tTRUE\t/"]
+    assert store._extract_sessdata(lines) is None
+
+
+def test_validate_logged_in_no_uname(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """isLogin True but uname missing → falls back to '?' rather than KeyError."""
+    d = _make_cookie_dir(tmp_path)
+    monkeypatch.setattr(
+        store, "_nav_probe", lambda s: ({"code": 0, "data": {"isLogin": True}}, None)
+    )
+    result = store.validate(d)
+    assert result.valid is True
+    assert result.uname == "?"
+
+
+# ─── ensure_cookie: orchestration branches ───────────────────────────────────
+
+
+def test_ensure_cookie_already_valid_skips_import(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the existing cookie validates online, import is never called."""
+    d = _make_cookie_dir(tmp_path)
+    monkeypatch.setattr(
+        store, "_nav_probe", lambda s: ({"code": 0, "data": {"isLogin": True, "uname": "u"}}, None)
+    )
+    from bili_dl.cookiesource import ImportResult
+
+    import_calls: list[Path] = []
+
+    def fake_import(cd: Path | None, dest: Path | None = None) -> ImportResult:
+        import_calls.append(cd or Path())
+        return ImportResult(success=True)
+
+    monkeypatch.setattr(store, "import_cookie", fake_import)
+    result = store.ensure_cookie(d)
+    assert result.ready is True
+    assert import_calls == []  # validate succeeded → no import
+
+
+def test_ensure_cookie_import_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """validate fails → source found → import fails → ready False."""
+    src = tmp_path / "s.txt"
+    src.write_text(DATA.read_text(encoding="utf-8"), encoding="utf-8")
+    from bili_dl.cookiesource import ImportResult
+
+    monkeypatch.setattr(
+        store,
+        "import_cookie",
+        lambda cd, dest=None: ImportResult(success=False, messages=[("error", "bad")]),
+    )
+    result = store.ensure_cookie(tmp_path)
+    assert result.ready is False

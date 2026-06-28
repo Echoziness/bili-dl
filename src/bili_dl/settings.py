@@ -46,6 +46,10 @@ def load(path: Path) -> Settings:
     Returns an empty :class:`Settings` (all fields ``None``) if the file
     doesn't exist or is empty. Raises ``tomllib.TOMLDecodeError`` on
     malformed TOML — the caller decides how to report it.
+
+    ``insecure`` is type-checked: a non-bool value (e.g. ``"yes"``) is
+    coerced to ``None`` so downstream ``cfg.insecure or False`` can't pick
+    up a truthy string by accident.
     """
     if not path.exists():
         return Settings()
@@ -53,10 +57,13 @@ def load(path: Path) -> Settings:
     with path.open("rb") as f:
         data: dict[str, Any] = tomllib.load(f)
 
+    insecure_raw = data.get("insecure")
+    insecure = insecure_raw if isinstance(insecure_raw, bool) else None
+
     return Settings(
         mode=data.get("mode"),
         proxy=data.get("proxy") or None,
-        insecure=data.get("insecure"),
+        insecure=insecure,
         video_dir=Path(data["video_dir"]) if data.get("video_dir") else None,
         audio_dir=Path(data["audio_dir"]) if data.get("audio_dir") else None,
         cookie_dir=Path(data["cookie_dir"]) if data.get("cookie_dir") else None,

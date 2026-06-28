@@ -354,3 +354,138 @@ def test_main_no_ffmpeg_warns_to_stderr(
     captured = capsys.readouterr()
     assert "ffmpeg" in captured.err  # stderr, not stdout
     assert "ffmpeg" not in captured.out
+
+
+# ─── _emit / _load_settings / _prepare_cookie / _run_once ────────────────────
+
+
+def test_emit_dispatches_all_levels(capsys: pytest.Capture) -> None:
+    cli._emit([("info", "i-msg"), ("ok", "o-msg"), ("warn", "w-msg"), ("error", "e-msg")])
+    err = capsys.readouterr().err
+    assert "i-msg" in err and "o-msg" in err and "w-msg" in err and "e-msg" in err
+
+
+def test_load_settings_malformed_warns(tmp_path: Path, capsys: pytest.Capture) -> None:
+    """Malformed TOML → warn + fall back to empty Settings (not a crash)."""
+    f = tmp_path / "bad.toml"
+    f.write_text("mode = \n", encoding="utf-8")
+    result = cli._load_settings(f)
+    assert result == settings.Settings()
+    err = capsys.readouterr().err
+    assert "解析失败" in err
+
+
+def test_prepare_cookie_failure_prints_help(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.Capture
+) -> None:
+    """When no cookie is available, a help block telling the user where to put
+    cookies is printed and _prepare_cookie returns False."""
+    from bili_dl import cookiestore
+
+    monkeypatch.setattr(
+        cookiestore,
+        "ensure_cookie",
+        lambda cd: cookiestore.EnsureResult(ready=False, messages=[]),
+    )
+    assert cli._prepare_cookie(cli.Options()) is False
+    err = capsys.readouterr().err
+    assert "没有可用的" in err
+    assert ".txt" in err  # guidance mentions the file extension
+
+
+def test_prepare_cookie_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    from bili_dl import cookiestore
+
+    monkeypatch.setattr(
+        cookiestore,
+        "ensure_cookie",
+        lambda cd: cookiestore.EnsureResult(ready=True, messages=[("ok", "ok")]),
+    )
+    assert cli._prepare_cookie(cli.Options()) is True
+
+
+def test_run_once_invokes_download(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_run_once builds a DownloadConfig and emits the download result."""
+    captured: list[str] = []
+
+    def fake_download(url: str, cfg: downloader.DownloadConfig) -> downloader.DownloadResult:
+        captured.append(url)
+        return downloader.DownloadResult(success=True, messages=[("ok", "done")])
+
+    monkeypatch.setattr(downloader, "download", fake_download)
+    monkeypatch.setattr("bili_dl.cookiestore.bili_cookie_path", lambda cd: Path("/c"))
+    assert cli._run_once(cli.Options(), "https://x", "yt-dlp", "ffmpeg") is True
+    assert captured == ["https://x"]
+
+
+# ─── _repl: mode switch / blank / download / quit ────────────────────────────
+
+
+def test_repl_mode_switch_then_quit(monkeypatch: pytest.MonkeyPatch) -> None:
+    inputs = iter(["a", "q"])
+    monkeypatch.setattr("bili_dl.ui.prompt", lambda p: next(inputs))
+    opts = cli.Options(mode="all")
+    assert cli._repl(opts, "yt-dlp", "ffmpeg") == 0
+    assert opts.mode == "a"  # switched mid-REPL
+
+
+def test_repl_blank_lines_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
+    inputs = iter(["", "   ", "q"])
+    monkeypatch.setattr("bili_dl.ui.prompt", lambda p: next(inputs))
+    assert cli._repl(cli.Options(), "yt-dlp", "ffmpeg") == 0
+
+
+def test_repl_downloads_url_then_quit(monkeypatch: pytest.MonkeyPatch) -> None:
+    called: list[str] = []
+    monkeypatch.setattr(cli, "_run_once", lambda opts, url, y, f: called.append(url) or True)
+    inputs = iter(["https://bilibili.com/video/BV1", "q"])
+    monkeypatch.setattr("bili_dl.ui.prompt", lambda p: next(inputs))
+    assert cli._repl(cli.Options(), "yt-dlp", "ffmpeg") == 0
+    assert called == ["https://bilibili.com/video/BV1"]
+
+
+# ─── main(): ensure_dir failure / top-level exception / merge edge cases ─────
+
+
+def test_main_ensure_dir_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(downloader, "find_ytdlp", lambda: "yt-dlp")
+    monkeypatch.setattr(ff, "find_ffmpeg", lambda: "ffmpeg")
+
+    def bad_mkdir(self: Path, *a: object, **kw: object) -> None:
+        raise OSError("permission denied")
+
+    monkeypatch.setattr(Path, "mkdir", bad_mkdir)
+    assert cli.main([]) == 1
+
+
+def test_main_top_level_exception_wrapped(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.Capture
+) -> None:
+    """Unexpected exceptions are caught and reported with the issues URL."""
+
+    def boom(argv: list[str] | None) -> int:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(cli, "_main_impl", boom)
+    assert cli.main([]) == 1
+    err = capsys.readouterr().err
+    assert "未预期" in err
+    assert "github.com/Echoziness/bili-dl/issues" in err
+
+
+def test_merge_settings_invalid_mode_falls_back() -> None:
+    """A mode string outside VALID_MODES falls back to 'all'."""
+    args = _build_parser().parse_args([])
+    args.mode = "bogus"  # simulate an invalid value sneaking in
+    opts = cli._merge_settings(args, settings.Settings())
+    assert opts.mode == "all"
+
+
+def test_merge_proxy_lowercase_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Lowercase https_proxy is honoured alongside HTTPS_PROXY (curl/git convention)."""
+    monkeypatch.delenv("HTTPS_PROXY", raising=False)
+    monkeypatch.delenv("HTTP_PROXY", raising=False)
+    monkeypatch.setenv("https_proxy", "http://lower:9999")
+    args = _build_parser().parse_args([])
+    opts = cli._merge_settings(args, settings.Settings())
+    assert opts.proxy == "http://lower:9999"

@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.7] - 2026-06-28
+
+### Fixed — Audit optimisation (A- → A)
+
+After a comprehensive review scored the project A- (coverage gap 63% vs
+claimed 87%, missing CI fail-under gate, 5 minor issues), every finding
+was addressed:
+
+- Proxy env vars now accept lowercase (`https_proxy`/`http_proxy`) alongside
+  uppercase, matching curl/git/requests convention.
+- `settings.load` type-checks `insecure`: non-bool values (e.g. `"yes"`, `1`)
+  are coerced to `None` so downstream `cfg.insecure or False` can't pick up a
+  truthy string.
+- `_extract_sessdata` now matches by Netscape column 6 (`fields[5] ==
+  "SESSDATA"`) instead of substring `"SESSDATA" in line` — a cookie value
+  containing `"SESSDATA"` would previously have falsely matched.
+- `cookiesource`: shared `_first_bili_source()` helper eliminates the
+  duplicated scan loop between `find_source` and `import_cookie`.
+- `ffmpeg` temp file name gets a random `uuid` suffix, preventing same-stem
+  concurrent-repair collisions.
+
+### Changed
+
+- CI: `coverage report --include="src/bili_dl/*" --fail-under=70` gates the
+  coverage job — a drop below 70% now fails CI (previously reported without
+  enforcing a floor).
+
+### Tests
+
+- Coverage raised from 63% to **98%** (107 → 159 tests). Backfilled branch
+  tests for every module: `cli` (+19), `ui` (+11), `ffmpeg` (+8),
+  `cookiesource` (+13), `cookiestore` (+8), `downloader` (+3), `settings`
+  (+2), `paths` (+2).
+
 ## [0.2.6] - 2026-06-28
 
 ### Fixed — Audit follow-up (11 issues)

@@ -46,4 +46,4 @@ jobs:
           cache: pip
       - run: pip install -e . pytest coverage
       - run: coverage run -m pytest -q
-      - run: coverage report --include="src/bili_dl/*"
+      - run: coverage report --include="src/bili_dl/*" --fail-under=70

@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from bili_dl import cookiesource as cs
 from bili_dl.cookiestore import bili_cookie_path
 
@@ -137,3 +139,84 @@ def test_www_bilibili_kept(tmp_path: Path) -> None:
     content = bili_cookie_path(tmp_path).read_text(encoding="utf-8")
     assert "SessionOnly" in content
     assert "www.bilibili.com" in content
+
+
+# ─── find_source / read_lines / _candidates edge cases ───────────────────────
+
+
+def test_find_source_returns_path(tmp_path: Path) -> None:
+    src = tmp_path / "cookies_export.txt"
+    src.write_text(DATA.read_text(encoding="utf-8"), encoding="utf-8")
+    assert cs.find_source(tmp_path) == src
+
+
+def test_find_source_dir_missing(tmp_path: Path) -> None:
+    """A non-existent cookie directory yields None, not an exception."""
+    assert cs.find_source(tmp_path / "nope") is None
+
+
+def test_find_source_no_bili(tmp_path: Path) -> None:
+    """A directory with only other-site cookies yields None."""
+    src = tmp_path / "other.txt"
+    src.write_text(".example.com\tTRUE\t/\tFALSE\t0\tfoo\tbar\n", encoding="utf-8")
+    assert cs.find_source(tmp_path) is None
+
+
+def test_read_lines_oserror_returns_empty(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """I/O errors on read degrade to [] rather than crashing (§2.20)."""
+    f = tmp_path / "x.txt"
+    f.write_text("ok\n", encoding="utf-8")
+
+    def bad_read(self: Path, *a: object, **kw: object) -> str:
+        raise OSError("boom")
+
+    monkeypatch.setattr(Path, "read_text", bad_read)
+    assert cs.read_lines(f) == []
+
+
+# ─── import_cookie: multi-candidate / write-failure branches ─────────────────
+
+
+def test_import_multiple_candidates(tmp_path: Path) -> None:
+    """When several .txt files exist, the count is reported in the info message."""
+    src1 = tmp_path / "a.txt"
+    src1.write_text(".example.com\tTRUE\t/\tFALSE\t0\tfoo\tbar\n", encoding="utf-8")
+    src2 = tmp_path / "b.txt"
+    src2.write_text(DATA.read_text(encoding="utf-8"), encoding="utf-8")
+    result = cs.import_cookie(tmp_path)
+    assert result.success is True
+    assert any("2 个" in t for _, t in result.messages)
+
+
+def test_import_write_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """OSError writing the output file → failure with reason (§2.20)."""
+    src = tmp_path / "cookies_export.txt"
+    src.write_text(DATA.read_text(encoding="utf-8"), encoding="utf-8")
+
+    def bad_write(self: Path, *a: object, **kw: object) -> int:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(Path, "write_text", bad_write)
+    result = cs.import_cookie(tmp_path)
+    assert result.success is False
+    assert any("无法写入" in t for _, t in result.messages)
+
+
+# ─── is_bili_line / _strip_httponly unit tests ───────────────────────────────
+
+
+def test_is_bili_line_true() -> None:
+    assert cs.is_bili_line(".bilibili.com\tTRUE\t/\tFALSE\t0\tSESSDATA\tx") is True
+
+
+def test_is_bili_line_comment_false() -> None:
+    assert cs.is_bili_line("# Netscape HTTP Cookie File") is False
+
+
+def test_is_bili_line_other_site_false() -> None:
+    assert cs.is_bili_line(".example.com\tTRUE\t/\tFALSE\t0\tfoo\tbar") is False
+
+
+def test_strip_httponly_prefix() -> None:
+    assert cs._strip_httponly("#HttpOnly_.bilibili.com") == ".bilibili.com"
+    assert cs._strip_httponly(".bilibili.com") == ".bilibili.com"

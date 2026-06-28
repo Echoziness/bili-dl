@@ -189,10 +189,17 @@ def _merge_settings(args: argparse.Namespace, cfg: settings.Settings) -> Options
     """
     mode = args.mode or cfg.mode or "all"
 
-    # Proxy: CLI flag > config > HTTP_PROXY/HTTPS_PROXY env (clig.dev standard)
+    # Proxy: CLI flag > config > env vars (clig.dev standard).
+    # Accept both upper and lower case — curl/git/requests all check both.
     proxy = args.proxy if args.proxy is not None else cfg.proxy
     if proxy is None:
-        proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or ""
+        proxy = (
+            os.environ.get("HTTPS_PROXY")
+            or os.environ.get("https_proxy")
+            or os.environ.get("HTTP_PROXY")
+            or os.environ.get("http_proxy")
+            or ""
+        )
 
     return Options(
         mode=mode if mode in VALID_MODES else "all",

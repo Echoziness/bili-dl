@@ -147,6 +147,17 @@
 - **`--retries 10`**：yt-dlp 默认重试 3 次（.part 重命名），提到 10 次以应对 Windows 文件锁定
 - **教训**：每个 `subprocess.run` 的 stderr 都应该被消费——要么实时显示（Phase 2 继承），要么捕获后带入错误消息（Phase 1 / ffmpeg）。光秃秃的 `[失败]` 是最差的用户体验。
 
+### 2.21 审查优化与覆盖率守门（v0.2.7）
+- **背景**：全面审查评估为 A-，扣分集中在覆盖率脱节（实测 63% vs 文档 §2.16 写 87%）+ CI 无 fail-under 闸门 + 5 个轻微问题。本轮做系统优化达 A。
+- **覆盖率**：从 63% 提升到 **98%**（107→159 测试）。补齐 cli/ui/ffmpeg/cookiesource/cookiestore/downloader/settings/paths 全模块短板分支。CI `coverage report --fail-under=70` 设闸门，覆盖率下滑会让 CI 变红。
+- **轻微问题修复**：
+  - 代理环境变量认大小写（`HTTPS_PROXY`/`https_proxy`/`HTTP_PROXY`/`http_proxy`），符合 curl/git/requests 惯例。Windows 环境变量本身大小写不敏感，Linux/macOS 区分（故大小写优先级测试无法在 Windows 跑，仅测小写被识别）。
+  - `settings.load` 对 `insecure` 做 `isinstance(bool)` 校验，非 bool 值（如 `"yes"`、`1`）coerce 为 `None`，防止下游 `cfg.insecure or False` 拾取 truthy 字符串。
+  - `_extract_sessdata` 改为按 Netscape 列 6（`fields[5] == "SESSDATA"`）精确匹配，替代原先的 `"SESSDATA" in line` 子串匹配，杜绝 value 含该字样的误判。域名校验同步改为 `fields[0]` 列精确含 `bilibili.com`。
+  - `cookiesource` 抽 `_first_bili_source()` 共享扫描逻辑，消除 `find_source` 与 `import_cookie` 的重复循环。
+  - `ffmpeg` 临时文件名加 `uuid.uuid4().hex[:8]` 随机后缀，消除同 stem 并发冲突隐患。测试相应改为从 `args[-1]` 取输出路径，与随机命名解耦。
+- **教训**：覆盖率是"可审计"的量化指标，必须配 CI 闸门否则会无声下滑；文档中的数字必须随版本同步，过时的数字比没有数字更糟（制造虚假信任）。
+
 ## 3. 项目结构
 
 ```
@@ -262,6 +273,7 @@ uv run python -m build
 - [x] v0.2.4 已发布（2026-06-28）
 - [x] v0.2.5 已发布（2026-06-28）
 - [x] v0.2.6 已发布（2026-06-28）
+- [x] v0.2.7 已发布（2026-06-28）
 
 ### 发版流程（当前）
 > 任何一步不绿不得进入下一步。

@@ -60,16 +60,25 @@ def _candidates(cookie_dir: Optional[Path] = None) -> list[Path]:
     return sorted(p for p in base.glob("*.txt") if p.name != BILI_COOKIE_FILENAME)
 
 
+def _first_bili_source(cookie_dir: Optional[Path] = None) -> Optional[Path]:
+    """First candidate ``.txt`` file containing Bilibili entries, or ``None``.
+
+    Shared by :func:`find_source` and :func:`import_cookie` so the scan logic
+    lives in one place (previously duplicated as inline loops).
+    """
+    for c in _candidates(cookie_dir):
+        if any(is_bili_line(line) for line in read_lines(c)):
+            return c
+    return None
+
+
 def find_source(cookie_dir: Optional[Path] = None) -> Optional[Path]:
     """Scan *cookie_dir* for the first ``.txt`` file with Bilibili entries.
 
     The output file ``cookies_bilibili.txt`` is excluded from candidates.
     Returns the source path or ``None`` if nothing was found.
     """
-    for src in _candidates(cookie_dir):
-        if any(is_bili_line(line) for line in read_lines(src)):
-            return src
-    return None
+    return _first_bili_source(cookie_dir)
 
 
 def import_cookie(cookie_dir: Optional[Path] = None, dest: Optional[Path] = None) -> ImportResult:
@@ -81,11 +90,7 @@ def import_cookie(cookie_dir: Optional[Path] = None, dest: Optional[Path] = None
     Existing output is backed up before overwrite.
     """
     candidates = _candidates(cookie_dir)
-    src: Optional[Path] = None
-    for c in candidates:
-        if any(is_bili_line(line) for line in read_lines(c)):
-            src = c
-            break
+    src = _first_bili_source(cookie_dir)
     if not src:
         return ImportResult(
             success=False,

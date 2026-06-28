@@ -81,3 +81,21 @@ def test_ensure_dir(tmp_path: Path) -> None:
     assert result == p
     # idempotent
     paths.ensure_dir(p)
+
+
+def test_audio_dir_win32_and_macos(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Windows and macOS audio dirs both resolve to ~/Music/bilibili_audio."""
+    monkeypatch.setattr(paths.Path, "home", lambda: tmp_path)
+    for plat, expected in (
+        ("win32", tmp_path / "Music" / "bilibili_audio"),
+        ("darwin", tmp_path / "Music" / "bilibili_audio"),
+    ):
+        monkeypatch.setattr(paths.sys, "platform", plat)
+        assert paths.default_audio_dir() == expected
+
+
+def test_config_file_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """config_file_path() is config_dir() / config.toml."""
+    monkeypatch.setattr(paths.sys, "platform", "win32")
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    assert paths.config_file_path() == tmp_path / "bili-dl" / "config.toml"

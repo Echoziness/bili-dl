@@ -69,3 +69,20 @@ def test_load_malformed_raises(tmp_path: Path) -> None:
     f.write_text("mode = \n", encoding="utf-8")
     with pytest.raises(tomllib.TOMLDecodeError):
         settings.load(f)
+
+
+def test_load_insecure_non_bool_coerced_to_none(tmp_path: Path) -> None:
+    """A non-bool insecure value (e.g. "yes") is coerced to None so downstream
+    ``cfg.insecure or False`` can't pick up a truthy string (§audit)."""
+    f = tmp_path / "config.toml"
+    f.write_text('insecure = "yes"\n', encoding="utf-8")
+    result = settings.load(f)
+    assert result.insecure is None
+
+
+def test_load_insecure_int_coerced_to_none(tmp_path: Path) -> None:
+    """An integer 1 is also not a bool → None (strict isinstance check)."""
+    f = tmp_path / "config.toml"
+    f.write_text("insecure = 1\n", encoding="utf-8")
+    result = settings.load(f)
+    assert result.insecure is None

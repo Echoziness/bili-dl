@@ -29,6 +29,7 @@ from __future__ import annotations
 import contextlib
 import shutil
 import subprocess
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -90,7 +91,11 @@ def repair_audio_container(audio_path: Path, ffmpeg: str) -> RepairResult:
             messages=[("error", f"[失败] 待修复的音频文件不存在: {audio_path}")],
         )
 
-    temp_path = audio_path.with_name("_temp_" + Path(audio_path.name).stem + ".m4a")
+    # Random suffix avoids collisions when two repairs on the same stem run
+    # concurrently (e.g. same title extracted from video and downloaded as audio).
+    temp_path = audio_path.with_name(
+        f"_temp_{Path(audio_path.name).stem}_{uuid.uuid4().hex[:8]}.m4a"
+    )
     rc, stderr = _run(
         [
             ffmpeg,

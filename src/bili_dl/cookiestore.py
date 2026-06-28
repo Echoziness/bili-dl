@@ -48,13 +48,24 @@ def bili_cookie_path(cookie_dir: Optional[Path] = None) -> Path:
 
 
 def _extract_sessdata(lines: list[str]) -> Optional[str]:
-    """Return the SESSDATA value from the first matching .bilibili.com line."""
+    """Return the SESSDATA value from the first matching bilibili.com line.
+
+    Matches by Netscape column 6 (name == "SESSDATA") rather than a substring
+    test on the whole line — a value containing ``"SESSDATA"`` would otherwise
+    falsely match. Domain column must contain ``bilibili.com``.
+    """
     for raw_line in lines:
         line = raw_line.removeprefix("#HttpOnly_")
-        if ".bilibili.com" in line and "SESSDATA" in line and not line.startswith("#"):
-            fields = line.split("\t")
-            if len(fields) >= 7 and fields[6]:
-                return fields[6]
+        if line.startswith("#"):
+            continue
+        fields = line.split("\t")
+        if (
+            len(fields) >= 7
+            and "bilibili.com" in fields[0]
+            and fields[5] == "SESSDATA"
+            and fields[6]
+        ):
+            return fields[6]
     return None
 
 

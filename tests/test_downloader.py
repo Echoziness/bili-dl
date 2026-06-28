@@ -272,3 +272,55 @@ def test_download_all_with_ffmpeg(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     result = downloader.download("https://bilibili.com/video/BV1", cfg)
     assert result.success is True
     assert any("提取音频" in t for _, t in result.messages)
+
+
+# ─── find_ytdlp + audio mode with ffmpeg repair ──────────────────────────────
+
+
+def test_find_ytdlp_present(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(downloader.shutil, "which", lambda name: "/usr/bin/yt-dlp")
+    assert downloader.find_ytdlp() == "/usr/bin/yt-dlp"
+
+
+def test_find_ytdlp_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(downloader.shutil, "which", lambda name: None)
+    assert downloader.find_ytdlp() is None
+
+
+def test_download_audio_with_ffmpeg_repair(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """mode=a + ffmpeg available → repair_audio_container is invoked (§2.3)."""
+    monkeypatch.setattr(downloader, "find_ytdlp", lambda: "yt-dlp")
+    out_file = tmp_path / "a" / "title.m4a"
+    calls = [0]
+
+    def fake_run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        calls[0] += 1
+        if calls[0] == 1:
+            return _completed_process(args, 0, stdout=str(out_file))
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+        out_file.write_bytes(b"\x00")
+        return _completed_process(args, 0)
+
+    monkeypatch.setattr(downloader.subprocess, "run", fake_run)
+
+    from bili_dl import ffmpeg as ff
+
+    repair_called: list[Path] = []
+
+    def fake_repair(path: Path, ffmpeg_bin: str) -> ff.RepairResult:
+        repair_called.append(path)
+        return ff.RepairResult(success=True, messages=[("ok", "[完成!] 容器已修复")])
+
+    monkeypatch.setattr(ff, "repair_audio_container", fake_repair)
+    cfg = DownloadConfig(
+        mode="a",
+        video_dir=tmp_path / "v",
+        audio_dir=tmp_path / "a",
+        cookie_path=tmp_path / "c.txt",
+        ytdlp="yt-dlp",
+        ffmpeg_bin="ffmpeg",
+    )
+    result = downloader.download("https://bilibili.com/video/BV1", cfg)
+    assert result.success is True
+    assert repair_called == [out_file]
+    assert any("容器已修复" in t for _, t in result.messages)
