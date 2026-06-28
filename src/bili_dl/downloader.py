@@ -126,7 +126,7 @@ def download(url: str, cfg: DownloadConfig) -> DownloadResult:
         capture_output=True,
         text=True,
     )
-    if predict.returncode != 0 or not predict.stdout.strip():
+    if not predict.stdout.strip():
         detail = predict.stderr.strip().splitlines()
         hint = detail[-1] if detail else "yt-dlp 未能获取视频信息"
         return DownloadResult(
@@ -134,6 +134,14 @@ def download(url: str, cfg: DownloadConfig) -> DownloadResult:
             messages=[("error", f"[失败] 无法获取视频信息: {hint}")],
         )
     out_path = Path(predict.stdout.strip())
+
+    # Phase 1 warnings (yt-dlp exit code is not a reliable failure
+    # signal — §2.11; same philosophy as Phase 2's file-exists check).
+    predict_warn: list[tuple[str, str]] = []
+    if predict.returncode != 0:
+        predict_warn.append(
+            ("warn", f"[警告] yt-dlp 退出码 {predict.returncode}（predict 非零，但路径已获取）")
+        )
 
     # Phase 2: real download (inherit stdout/stderr for the progress bar) ----
     result = subprocess.run([ytdlp, *common, "-f", fmt, *merge, "-o", tmpl, url])
@@ -146,11 +154,10 @@ def download(url: str, cfg: DownloadConfig) -> DownloadResult:
 
     # Post-processing ---------------------------------------------------------
     if cfg.mode == "a":
-        msgs: list[tuple[str, str]] = [("ok", f"[完成!] 音频: {out_path}")]
+        msgs: list[tuple[str, str]] = list(predict_warn)
+        msgs.append(("ok", f"[完成!] 音频: {out_path}"))
         if result.returncode != 0:
-            msgs.insert(
-                0, ("warn", f"[警告] yt-dlp 退出码 {result.returncode}（非零，但文件已生成）")
-            )
+            msgs.append(("warn", f"[警告] yt-dlp 退出码 {result.returncode}（非零，但文件已生成）"))
         if cfg.ffmpeg_bin:
             repair = ff.repair_audio_container(out_path, cfg.ffmpeg_bin)
             msgs.extend(repair.messages)
@@ -159,10 +166,11 @@ def download(url: str, cfg: DownloadConfig) -> DownloadResult:
         return DownloadResult(success=True, messages=msgs, output_path=out_path)
 
     # mode == "all" or "v" — video path
-    video_msgs: list[tuple[str, str]] = [("ok", f"[完成!] 视频: {out_path}")]
+    video_msgs: list[tuple[str, str]] = list(predict_warn)
+    video_msgs.append(("ok", f"[完成!] 视频: {out_path}"))
     if result.returncode != 0:
-        video_msgs.insert(
-            0, ("warn", f"[警告] yt-dlp 退出码 {result.returncode}（非零，但文件已生成）")
+        video_msgs.append(
+            ("warn", f"[警告] yt-dlp 退出码 {result.returncode}（非零，但文件已生成）")
         )
     if cfg.mode == "all" and cfg.ffmpeg_bin:
         extract = ff.extract_audio(out_path, cfg.audio_dir, cfg.ffmpeg_bin)

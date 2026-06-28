@@ -7,8 +7,9 @@ translates them into terminal output via :func:`_emit`.
 
 Configuration precedence (highest to lowest, per clig.dev §Configuration):
   1. CLI flags (``--proxy``, ``-a``, etc.)
-  2. Environment variables (``HTTP_PROXY``, ``NO_COLOR``)
-  3. ``config.toml`` in the config directory (or ``--config`` path)
+  2. ``config.toml`` in the config directory (or ``--config`` path)
+  3. Environment variables (``HTTP_PROXY``/``HTTPS_PROXY`` for proxy only;
+     ``NO_COLOR`` for colour suppression)
   4. Built-in defaults
 
 Modes:

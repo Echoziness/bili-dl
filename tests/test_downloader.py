@@ -274,6 +274,38 @@ def test_download_all_with_ffmpeg(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     assert any("提取音频" in t for _, t in result.messages)
 
 
+def test_download_phase1_warns_but_proceeds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Phase 1 rc != 0 with valid stdout → warn, not fail (§2.11 consistency)."""
+    monkeypatch.setattr(downloader, "find_ytdlp", lambda: "yt-dlp")
+    out_file = tmp_path / "v" / "title.mp4"
+    calls = [0]
+
+    def fake_run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        calls[0] += 1
+        if calls[0] == 1:  # Phase 1: rc=3 (warning) but stdout has valid path
+            return _completed_process(args, 3, stdout=str(out_file))
+        # Phase 2: create file, rc=0
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+        out_file.write_bytes(b"\x00")
+        return _completed_process(args, 0)
+
+    monkeypatch.setattr(downloader.subprocess, "run", fake_run)
+    cfg = DownloadConfig(
+        mode="v",
+        video_dir=tmp_path / "v",
+        audio_dir=tmp_path / "a",
+        cookie_path=tmp_path / "c.txt",
+        ytdlp="yt-dlp",
+        ffmpeg_bin=None,
+    )
+    result = downloader.download("https://bilibili.com/video/BV1", cfg)
+    assert result.success is True
+    assert any("退出码 3" in t for _, t in result.messages)
+    assert any("predict" in t for _, t in result.messages)
+
+
 # ─── find_ytdlp + audio mode with ffmpeg repair ──────────────────────────────
 
 
