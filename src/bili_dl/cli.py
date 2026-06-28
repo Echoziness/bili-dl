@@ -330,6 +330,7 @@ def _main_impl(argv: Optional[list[str]] = None) -> int:
         ui.warn("[警告] 未找到 ffmpeg，将跳过音频提取与容器修复")
 
     try:
+        ensure_dir(opts.cookie_dir or config_dir())
         ensure_dir(opts.video_dir or default_video_dir())
         ensure_dir(opts.audio_dir or default_audio_dir())
     except OSError as e:
