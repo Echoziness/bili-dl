@@ -30,11 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.7] - 2026-06-28
 
-### Fixed — Audit optimisation (A- → A)
+### Fixed — Audit optimisation
 
-After a comprehensive review scored the project A- (coverage gap 63% vs
-claimed 87%, missing CI fail-under gate, 5 minor issues), every finding
-was addressed:
+After a comprehensive review found a coverage gap (63% vs claimed 87%),
+missing CI fail-under gate, and 5 minor issues, every finding was addressed:
 
 - Proxy env vars now accept lowercase (`https_proxy`/`http_proxy`) alongside
   uppercase, matching curl/git/requests convention.
@@ -418,3 +417,6 @@ the system *larger* without making it *simpler*.
 [0.2.4]: https://github.com/Echoziness/bili-dl/releases/tag/v0.2.4
 [0.2.5]: https://github.com/Echoziness/bili-dl/releases/tag/v0.2.5
 [0.2.6]: https://github.com/Echoziness/bili-dl/releases/tag/v0.2.6
+[0.2.7]: https://github.com/Echoziness/bili-dl/releases/tag/v0.2.7
+[0.2.8]: https://github.com/Echoziness/bili-dl/releases/tag/v0.2.8
+[0.2.9]: https://github.com/Echoziness/bili-dl/releases/tag/v0.2.9

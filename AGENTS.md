@@ -148,7 +148,7 @@
 - **教训**：每个 `subprocess.run` 的 stderr 都应该被消费——要么实时显示（Phase 2 继承），要么捕获后带入错误消息（Phase 1 / ffmpeg）。光秃秃的 `[失败]` 是最差的用户体验。
 
 ### 2.21 审查优化与覆盖率守门（v0.2.7）
-- **背景**：全面审查评估为 A-，扣分集中在覆盖率脱节（实测 63% vs 文档 §2.16 写 87%）+ CI 无 fail-under 闸门 + 5 个轻微问题。本轮做系统优化达 A。
+- **背景**：审查发现覆盖率脱节（实测 63% vs 文档 §2.16 写 87%）+ CI 无 fail-under 闸门 + 5 个轻微问题。本轮做系统优化。
 - **覆盖率**：从 63% 提升到 **98%**（107→159 测试）。补齐 cli/ui/ffmpeg/cookiesource/cookiestore/downloader/settings/paths 全模块短板分支。CI `coverage report --fail-under=70` 设闸门，覆盖率下滑会让 CI 变红。
 - **轻微问题修复**：
   - 代理环境变量认大小写（`HTTPS_PROXY`/`https_proxy`/`HTTP_PROXY`/`http_proxy`），符合 curl/git/requests 惯例。Windows 环境变量本身大小写不敏感，Linux/macOS 区分（故大小写优先级测试无法在 Windows 跑，仅测小写被识别）。
@@ -157,6 +157,13 @@
   - `cookiesource` 抽 `_first_bili_source()` 共享扫描逻辑，消除 `find_source` 与 `import_cookie` 的重复循环。
   - `ffmpeg` 临时文件名加 `uuid.uuid4().hex[:8]` 随机后缀，消除同 stem 并发冲突隐患。测试相应改为从 `args[-1]` 取输出路径，与随机命名解耦。
 - **教训**：覆盖率是"可审计"的量化指标，必须配 CI 闸门否则会无声下滑；文档中的数字必须随版本同步，过时的数字比没有数字更糟（制造虚假信任）。
+
+### 2.22 `data.get("proxy") or None` 吞掉「显式禁用」语义（v0.2.9 踩坑）
+- **现象（第三方审查发现）**：用户在 `config.toml` 写 `proxy = ""` 想禁用代理，但系统有 `HTTPS_PROXY` 环境变量时，bili-dl 反而走了系统代理。用户「明明禁了代理」却看到代理生效——配置文件语义被实现细节反转。
+- **根因**：`settings.load` 的 `data.get("proxy") or None` 把空字符串（用户显式写 `""`）归一为 `None`（与「未配置该键」不可区分）。下游 `_merge_settings` 对 `None` 的处理是「未配置 → 查环境变量」——空串用户的意图恰恰相反是「我明确要 None，不要查环境」。
+- **解法（v0.2.9）**：移除 `or None`，改为 `data.get("proxy")`。`tomllib` 对不存在的 key 返回 `None`，对 `proxy = ""` 返回 `""`——两者语义不同，应该保留。`_merge_settings` 的 `if proxy is None` 自然区分：`None` → 未配置 → 查 env；`""` → 显式禁用 → 跳过 env。
+- **测试锚定**：`test_empty_proxy_in_config_blocks_env_proxy` 断言 `proxy=""` 不被 env 覆盖；`test_load_empty_proxy_preserved` 断言 `""` 不被 `or None` 吞掉。
+- **教训**：`or None` 只能用于「不存在」与「空串」语义等价时。凡是用户可能主动写空值的配置字段，都要区分「没写」（None）与「写了但为空」（""）——否则显式意图会被静默反转，用户极难自我诊断。
 
 ## 3. 项目结构
 
