@@ -79,7 +79,7 @@ def _nav_probe(sessdata: str) -> tuple[Optional[dict[str, Any]], Optional[str]]:
             return data, None
     except urllib.error.HTTPError as e:
         return None, f"http:{e.code}"
-    except (urllib.error.URLError, OSError):
+    except (urllib.error.URLError, OSError, json.JSONDecodeError):
         return None, "network"
 
 

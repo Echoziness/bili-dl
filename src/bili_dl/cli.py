@@ -300,6 +300,15 @@ def _repl(opts: Options, ytdlp: str, ffmpeg_bin: Optional[str]) -> int:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    try:
+        return _main_impl(argv)
+    except Exception as e:
+        ui.error(f"[错误] 发生未预期错误: {e}")
+        ui.info("请将以上错误信息提交到 https://github.com/Echoziness/bili-dl/issues")
+        return 1
+
+
+def _main_impl(argv: Optional[list[str]] = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
@@ -320,8 +329,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     if not ffmpeg_bin:
         ui.warn("[警告] 未找到 ffmpeg，将跳过音频提取与容器修复")
 
-    ensure_dir(opts.video_dir or default_video_dir())
-    ensure_dir(opts.audio_dir or default_audio_dir())
+    try:
+        ensure_dir(opts.video_dir or default_video_dir())
+        ensure_dir(opts.audio_dir or default_audio_dir())
+    except OSError as e:
+        ui.error(f"[错误] 无法创建输出目录: {e}")
+        ui.info("请检查路径权限或使用 --output-dir / --audio-dir 指定其他目录")
+        return 1
 
     ui.info("B 站视频下载工具")
     print(file=sys.stderr)
@@ -334,7 +348,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         if not args.batch_file.exists():
             ui.error(f"[错误] 批量文件不存在: {args.batch_file}")
             return 1
-        urls = _read_batch_urls(args.batch_file)
+        try:
+            urls = _read_batch_urls(args.batch_file)
+        except OSError as e:
+            ui.error(f"[错误] 无法读取批量文件: {e}")
+            return 1
         if not urls:
             ui.warn("[警告] 批量文件中没有有效 URL")
             return 0

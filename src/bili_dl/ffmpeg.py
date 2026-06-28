@@ -15,6 +15,13 @@ This module is pure logic — it returns :class:`RepairResult` /
 :class:`ExtractResult` objects and never calls ``ui.*`` directly. The
 controller (``cli.py``) is responsible for turning result messages into
 terminal output.
+
+Robustness: all ffmpeg invocations capture stderr. On failure, the actual
+ffmpeg error text is included in the result message so the user knows
+*why* it failed — not just *that* it failed. All filesystem operations
+(mkdir, replace, stat, unlink) are wrapped in try/except to prevent
+unhandled crashes from transient OS errors (WinError 32 file locking,
+permission denied, disk full, etc.).
 """
 
 from __future__ import annotations
@@ -50,9 +57,26 @@ def find_ffmpeg() -> Optional[str]:
     return shutil.which("ffmpeg")
 
 
-def _run(args: list[str]) -> int:
-    """Run ffmpeg/ffprobe; inherit stdout/stderr so progress bars show."""
-    return subprocess.call(args)
+def _run(args: list[str]) -> tuple[int, str]:
+    """Run ffmpeg; return (returncode, stderr_text).
+
+    Captures stderr so that on failure the actual ffmpeg error can be
+    included in the result message — the user sees *why* ffmpeg failed,
+    not just *that* it failed.
+    """
+    result = subprocess.run(args, capture_output=True, text=True)
+    return result.returncode, result.stderr.strip()
+
+
+def _stderr_detail(stderr: str) -> str:
+    """Format stderr for inclusion in error messages."""
+    if not stderr:
+        return ""
+    # ffmpeg stderr can be multi-line; take the last meaningful line
+    lines = [ln.strip() for ln in stderr.splitlines() if ln.strip()]
+    if lines:
+        return f": {lines[-1]}"
+    return ""
 
 
 def repair_audio_container(audio_path: Path, ffmpeg: str) -> RepairResult:
@@ -63,11 +87,11 @@ def repair_audio_container(audio_path: Path, ffmpeg: str) -> RepairResult:
     if not audio_path.exists():
         return RepairResult(
             success=False,
-            messages=[("error", "[失败] 待修复的音频文件不存在")],
+            messages=[("error", f"[失败] 待修复的音频文件不存在: {audio_path}")],
         )
 
     temp_path = audio_path.with_name("_temp_" + Path(audio_path.name).stem + ".m4a")
-    rc = _run(
+    rc, stderr = _run(
         [
             ffmpeg,
             "-y",
@@ -89,10 +113,25 @@ def repair_audio_container(audio_path: Path, ffmpeg: str) -> RepairResult:
     )
 
     if rc == 0 and temp_path.exists():
-        orig_size = audio_path.stat().st_size
-        new_size = temp_path.stat().st_size
+        try:
+            orig_size = audio_path.stat().st_size
+            new_size = temp_path.stat().st_size
+        except OSError as e:
+            return RepairResult(
+                success=False,
+                messages=[("error", f"[失败] 无法读取文件大小: {e}")],
+            )
         if new_size > orig_size * REPAIR_MIN_SIZE_RATIO:
-            temp_path.replace(audio_path)
+            try:
+                temp_path.replace(audio_path)
+            except OSError as e:
+                # WinError 32 (file locked) or permission denied
+                with contextlib.suppress(OSError):
+                    temp_path.unlink()
+                return RepairResult(
+                    success=False,
+                    messages=[("error", f"[失败] 容器修复失败（无法替换文件: {e}），保留原文件")],
+                )
             return RepairResult(
                 success=True,
                 messages=[("ok", f"[完成!] 容器已修复: {audio_path}")],
@@ -103,7 +142,7 @@ def repair_audio_container(audio_path: Path, ffmpeg: str) -> RepairResult:
             temp_path.unlink()
     return RepairResult(
         success=False,
-        messages=[("error", "[失败] 容器修复失败，保留原文件")],
+        messages=[("error", f"[失败] 容器修复失败{_stderr_detail(stderr)}，保留原文件")],
     )
 
 
@@ -112,10 +151,16 @@ def extract_audio(video_path: Path, audio_dir: Path, ffmpeg: str) -> ExtractResu
 
     Only copies the stream (no re-encode); then standardises the container.
     """
-    audio_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        audio_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        return ExtractResult(
+            success=False,
+            messages=[("error", f"[失败] 无法创建音频目录 {audio_dir}: {e}")],
+        )
     audio_path = audio_dir / f"{video_path.stem}.m4a"
 
-    rc = _run(
+    rc, stderr = _run(
         [
             ffmpeg,
             "-y",
@@ -138,7 +183,7 @@ def extract_audio(video_path: Path, audio_dir: Path, ffmpeg: str) -> ExtractResu
     if rc != 0 or not audio_path.exists():
         return ExtractResult(
             success=False,
-            messages=[("error", "[失败] 音频提取失败")],
+            messages=[("error", f"[失败] 音频提取失败{_stderr_detail(stderr)}")],
         )
 
     # Standardise container for foobar2000 friendliness (same as the `a` path)

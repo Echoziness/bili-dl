@@ -135,6 +135,18 @@
 - **实现**：`cli._read_batch_urls()` 解析文件 → `cli._batch_download()` 顺序下载并统计成功/失败数。
 - **返回码**：全部成功返回 0，任一失败返回 1。空文件返回 0（无 URL 不是错误）。
 
+### 2.20 全面鲁棒性审查（v0.2.4）
+- **背景**：用户帮朋友配好环境后，下载报光秃秃 `[失败]`，同版本自己的机器正常。排查发现 v0.1.8 的 returncode regression（§2.11 v0.2.2 修）+ 错误消息无上下文（§2.11 v0.2.3 修）。随后做全面审查发现 8 个问题。
+- **错误消息全部带原因**：
+  - Phase 1 predict 失败 → 带 yt-dlp stderr 最后一行
+  - ffmpeg repair/extract 失败 → 带 ffmpeg stderr（`_run` 从 `subprocess.call` 改为 `subprocess.run(capture_output=True)`，返回 `(rc, stderr)`）
+  - 文件不存在 → 带路径
+- **所有 OSError 包 try/except**：`mkdir`/`replace`/`stat`/`write_text`/`read_text`（权限拒绝、磁盘满、WinError 32 文件锁定、路径过长）
+- **`json.JSONDecodeError` catch**：`_nav_probe` 原来只 catch `HTTPError`/`URLError`/`OSError`，B站返回 HTML 而非 JSON 时崩溃
+- **顶层异常处理**：`main()` 包 `try/except Exception`，未预期错误打印友好消息 + issues URL，不喷栈
+- **`--retries 10`**：yt-dlp 默认重试 3 次（.part 重命名），提到 10 次以应对 Windows 文件锁定
+- **教训**：每个 `subprocess.run` 的 stderr 都应该被消费——要么实时显示（Phase 2 继承），要么捕获后带入错误消息（Phase 1 / ffmpeg）。光秃秃的 `[失败]` 是最差的用户体验。
+
 ## 3. 项目结构
 
 ```
@@ -252,6 +264,7 @@ uv run python -m build
 - [x] v0.2.1 已发布（2026-06-28）
 - [x] v0.2.2 已发布（2026-06-28）
 - [x] v0.2.3 已发布（2026-06-28）
+- [x] v0.2.4 已发布（2026-06-28）
 
 ### 发版流程（当前）
 > 任何一步不绿不得进入下一步。

@@ -37,6 +37,7 @@ def test_common_args_basic(tmp_path: Path) -> None:
     cfg = _cfg(tmp_path)
     args = downloader._common_args(cfg)
     assert "--no-playlist" in args
+    assert "--retries" in args
     idx = args.index("--cookies")
     assert args[idx + 1] == str(cfg.cookie_path)
     idx = args.index("--add-header")

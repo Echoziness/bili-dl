@@ -113,6 +113,10 @@ def import_cookie(cookie_dir: Optional[Path] = None, dest: Optional[Path] = None
         out.append("\t".join(fields))
 
     dst.parent.mkdir(parents=True, exist_ok=True)
-    dst.write_text("\n".join(out) + "\n", encoding="utf-8")
+    try:
+        dst.write_text("\n".join(out) + "\n", encoding="utf-8")
+    except OSError as e:
+        msgs.append(("error", f"[错误] 无法写入 Cookie 文件 {dst}: {e}"))
+        return ImportResult(success=False, messages=msgs, count=len(bili_lines), source=src)
     msgs.append(("ok", f"[摄取] 已提取 {len(bili_lines)} 条 B 站 Cookie -> {dst.name}"))
     return ImportResult(success=True, messages=msgs, count=len(bili_lines), source=src)

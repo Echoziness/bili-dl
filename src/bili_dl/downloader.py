@@ -80,7 +80,7 @@ def _common_args(cfg: DownloadConfig) -> list[str]:
     (see AGENTS.md §2.1: the PowerShell scoping bug that silently dropped
     these exact args).
     """
-    args: list[str] = ["--no-playlist", "--cookies", str(cfg.cookie_path)]
+    args: list[str] = ["--no-playlist", "--retries", "10", "--cookies", str(cfg.cookie_path)]
     args += ["--add-header", f"Referer:{cfg.referer}"]
     if cfg.proxy:
         args += ["--proxy", cfg.proxy]
@@ -127,9 +127,11 @@ def download(url: str, cfg: DownloadConfig) -> DownloadResult:
         text=True,
     )
     if predict.returncode != 0 or not predict.stdout.strip():
+        detail = predict.stderr.strip().splitlines()
+        hint = detail[-1] if detail else "yt-dlp 未能获取视频信息"
         return DownloadResult(
             success=False,
-            messages=[("error", "[失败] 无法获取视频信息")],
+            messages=[("error", f"[失败] 无法获取视频信息: {hint}")],
         )
     out_path = Path(predict.stdout.strip())
 

@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] - 2026-06-28
+
+### Fixed — Comprehensive robustness audit (8 issues)
+
+After a user experienced a bare `[失败]` on a friend's machine with no
+way to diagnose the cause, a full robustness audit was performed across
+all source files. Every error path now either includes the actual error
+detail or degrades gracefully — no bare messages, no unhandled crashes.
+
+**Error messages now include the actual failure reason:**
+- Phase 1 predict failure: includes yt-dlp's stderr last line
+  (`[失败] 无法获取视频信息: <yt-dlp error>`)
+- ffmpeg repair/extract failure: includes ffmpeg's stderr
+  (`[失败] 容器修复失败: <ffmpeg error>，保留原文件`)
+- File-not-found in repair: includes the path
+  (`[失败] 待修复的音频文件不存在: <path>`)
+
+**Unhandled exceptions now caught (no more stack traces):**
+- `cookiestore._nav_probe`: `json.JSONDecodeError` caught (B站 returns
+  HTML instead of JSON)
+- `cli.main`: top-level try/except catches any unexpected exception,
+  prints friendly message + issues URL instead of stack trace
+- `cli.ensure_dir`: OSError caught (permission denied / disk full /
+  path too long)
+- `cli._read_batch_urls`: OSError caught (file unreadable)
+- `ffmpeg.extract_audio`: `mkdir` OSError caught
+- `ffmpeg.repair_audio_container`: `replace`/`stat` OSError caught
+  (WinError 32 file locking, permission denied)
+- `cookiesource.import_cookie`: `write_text` OSError caught
+
+**Download resilience:**
+- yt-dlp now gets `--retries 10` (was default 10 for fragments, but
+  the rename retry for .part files was default 3). More chances to
+  recover from transient WinError 32 file locking.
+
+### Tests
+- `test_ffmpeg.py` rewritten: mocks `subprocess.run` (was `subprocess.call`),
+  tests stderr in error messages, tests mkdir failure.
+- 105 tests total (up from 104).
+
 ## [0.2.3] - 2026-06-28
 
 ### Fixed — Error message UX
@@ -270,3 +310,4 @@ the system *larger* without making it *simpler*.
 [0.2.1]: https://github.com/Echoziness/bili-dl/releases/tag/v0.2.1
 [0.2.2]: https://github.com/Echoziness/bili-dl/releases/tag/v0.2.2
 [0.2.3]: https://github.com/Echoziness/bili-dl/releases/tag/v0.2.3
+[0.2.4]: https://github.com/Echoziness/bili-dl/releases/tag/v0.2.4
