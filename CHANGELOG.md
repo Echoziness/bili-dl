@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-06-28
+
+### Added — Two feature modules
+- **TOML config file** (`config.toml`): set defaults for `mode`, `proxy`,
+  `insecure`, `video_dir`, `audio_dir`, `cookie_dir` without repeating CLI
+  flags. CLI flags always override config values. Use `--config FILE` to
+  override the config path. New module: `src/bili_dl/settings.py`.
+- **Batch download** (`--batch-file FILE`): download a list of URLs from a
+  text file (one URL per line, `#` comments). Reports success/failure count;
+  exit code 0 if all succeed, 1 if any fail.
+
+### Changed
+- **Minimum Python version raised to 3.11** (was 3.9). `tomllib` is stdlib
+  since 3.11, preserving the zero-dependency constraint. TOML is used instead
+  of INI because it is the Python ecosystem standard (PEP 518/621).
+- CI Python matrix: 3.11 + 3.13 (was 3.9 + 3.13).
+- `--insecure` and `--proxy` now use `default=None` to distinguish "not
+  specified" from "explicitly set", enabling proper config-file fallback.
+
+### Tests
+- `tests/test_settings.py` (6 tests): missing/complete/partial/empty config,
+  empty-proxy handling, malformed TOML error.
+- `tests/test_cli.py` expanded (10 new): config merge precedence, config
+  file loading in main(), batch file parsing, batch download success/failure,
+  empty batch file.
+- Total: 92 tests (up from 76).
+
 ## [0.1.9] - 2026-06-28
 
 ### Removed — Simplification (KISS regression)
@@ -189,3 +216,4 @@ the system *larger* without making it *simpler*.
 [0.1.7]: https://github.com/Echoziness/bili-dl/releases/tag/v0.1.7
 [0.1.8]: https://github.com/Echoziness/bili-dl/releases/tag/v0.1.8
 [0.1.9]: https://github.com/Echoziness/bili-dl/releases/tag/v0.1.9
+[0.2.0]: https://github.com/Echoziness/bili-dl/releases/tag/v0.2.0

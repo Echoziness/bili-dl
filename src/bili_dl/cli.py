@@ -1,31 +1,34 @@
 """Command-line interface and interactive REPL for bili-dl.
 
 This is the **controller / presentation layer** — the only module that calls
-``ui.*``. All logic modules (cookiesource, cookiestore, ffmpeg, downloader)
-return result objects with structured messages; this module translates them
-into terminal output via :func:`_emit`.
+``ui.*``. All logic modules (cookiesource, cookiestore, ffmpeg, downloader,
+settings) return result objects with structured messages; this module
+translates them into terminal output via :func:`_emit`.
 
-Modes (mirror the original bd.ps1):
+Configuration precedence (highest to lowest):
+  1. CLI flags (``--proxy``, ``-a``, etc.)
+  2. ``config.toml`` in the config directory (or ``--config`` path)
+  3. Built-in defaults
+
+Modes:
   all — video+audio (DASH, merged to MP4) + extract independent M4A
   v   — video only (single-file MP4 when such a stream exists)
   a   — audio only (M4A, standardised to faststart ISOM)
-
-Both audio-producing paths route the output through ffmpeg zero-copy remux,
-so the produced M4A has moov-first layout friendly to foobar2000 etc.
 """
 
 from __future__ import annotations
 
 import argparse
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from . import __version__, cookiestore, downloader, ui
+from . import __version__, cookiestore, downloader, settings, ui
 from . import ffmpeg as ff
 from .config import VALID_MODES
 from .downloader import DownloadConfig
-from .paths import config_dir, default_audio_dir, default_video_dir, ensure_dir
+from .paths import config_dir, config_file_path, default_audio_dir, default_video_dir, ensure_dir
 
 # Encoding policy: we deliberately do NOT force UTF-8 on stdio nor set
 # PYTHONUTF8. yt-dlp and Python both emit using the host's default locale
@@ -99,11 +102,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "-k",
         "--insecure",
         action="store_true",
+        default=None,
         help="skip TLS certificate verification (special environments only)",
     )
     p.add_argument(
         "--proxy",
-        default="",
+        default=None,
         metavar="URL",
         help="proxy URL for yt-dlp (e.g. http://127.0.0.1:7890)",
     )
@@ -128,8 +132,57 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="DIR",
         help="override audio output directory",
     )
+    p.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        metavar="FILE",
+        help=f"override config file path (default: {config_file_path()})",
+    )
+    p.add_argument(
+        "--batch-file",
+        type=Path,
+        default=None,
+        metavar="FILE",
+        help="download URLs listed in a text file (one URL per line, # comments)",
+    )
     p.add_argument("url", nargs="?", default=None, help="Bilibili video URL")
     return p
+
+
+def _load_settings(config_path: Optional[Path]) -> settings.Settings:
+    """Load config.toml, returning empty Settings on missing file."""
+    path = config_path or config_file_path()
+    try:
+        return settings.load(path)
+    except tomllib.TOMLDecodeError as e:
+        ui.warn(f"[警告] 配置文件 {path} 解析失败: {e}")
+        ui.warn("[警告] 忽略配置文件，使用命令行参数和默认值")
+        return settings.Settings()
+
+
+def _merge_settings(args: argparse.Namespace, cfg: settings.Settings) -> Options:
+    """Merge config file settings with CLI args. CLI flags take precedence."""
+    mode = args.mode or cfg.mode or "all"
+    return Options(
+        mode=mode if mode in VALID_MODES else "all",
+        proxy=args.proxy if args.proxy is not None else (cfg.proxy or ""),
+        insecure=args.insecure if args.insecure is not None else (cfg.insecure or False),
+        cookie_dir=args.cookie_dir or cfg.cookie_dir,
+        video_dir=args.output_dir or cfg.video_dir,
+        audio_dir=args.audio_dir or cfg.audio_dir,
+    )
+
+
+def _read_batch_urls(path: Path) -> list[str]:
+    """Read URLs from a batch file, skipping blank lines and # comments."""
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    urls = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            urls.append(stripped)
+    return urls
 
 
 def _prepare_cookie(opts: Options) -> bool:
@@ -171,6 +224,24 @@ def _run_once(opts: Options, url: str, ytdlp: str, ffmpeg_bin: Optional[str]) ->
     return result.success
 
 
+def _batch_download(opts: Options, urls: list[str], ytdlp: str, ffmpeg_bin: Optional[str]) -> int:
+    """Download multiple URLs sequentially. Returns 0 if all succeed, 1 if any fail."""
+    total = len(urls)
+    ui.info(f"[批量] 共 {total} 个链接")
+    failures = 0
+    for i, url in enumerate(urls, 1):
+        print()
+        ui.info(f"[批量] ({i}/{total}) {url}")
+        if not _run_once(opts, url, ytdlp, ffmpeg_bin):
+            failures += 1
+    print()
+    if failures:
+        ui.warn(f"[批量] 完成: {total - failures} 成功, {failures} 失败")
+    else:
+        ui.ok(f"[批量] 全部完成: {total} 个链接")
+    return 1 if failures else 0
+
+
 def _repl(opts: Options, ytdlp: str, ffmpeg_bin: Optional[str]) -> int:
     print(f"使用: {ytdlp}")
     print()
@@ -201,14 +272,10 @@ def _repl(opts: Options, ytdlp: str, ffmpeg_bin: Optional[str]) -> int:
 def main(argv: Optional[list[str]] = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
-    opts = Options(
-        mode=args.mode or "all",
-        proxy=args.proxy,
-        insecure=args.insecure,
-        cookie_dir=args.cookie_dir,
-        video_dir=args.output_dir,
-        audio_dir=args.audio_dir,
-    )
+
+    # Load config file, merge with CLI args (CLI takes precedence) ----------
+    cfg = _load_settings(args.config)
+    opts = _merge_settings(args, cfg)
 
     # Dependency checks (same severity ladder as bd.ps1) ---------------------
     ytdlp = downloader.find_ytdlp()
@@ -228,7 +295,21 @@ def main(argv: Optional[list[str]] = None) -> int:
     if not _prepare_cookie(opts):
         return 1
 
-    # Non-interactive mode: one shot then exit -------------------------------
+    # Batch mode: read URLs from file, download all --------------------------
+    if args.batch_file:
+        if not args.batch_file.exists():
+            ui.error(f"[错误] 批量文件不存在: {args.batch_file}")
+            return 1
+        urls = _read_batch_urls(args.batch_file)
+        if not urls:
+            ui.warn("[警告] 批量文件中没有有效 URL")
+            return 0
+        ui.info(f"使用: {ytdlp}")
+        ui.info(f"模式: {ui.mode_label(opts.mode)} | 批量文件: {args.batch_file}")
+        print()
+        return _batch_download(opts, urls, ytdlp, ffmpeg_bin)
+
+    # Non-interactive mode: one URL then exit --------------------------------
     if args.url:
         ui.info(f"使用: {ytdlp}")
         ui.info(f"模式: {ui.mode_label(opts.mode)} | URL: {args.url}")

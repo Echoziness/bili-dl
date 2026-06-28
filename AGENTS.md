@@ -4,7 +4,7 @@
 
 ## 1. 技术栈
 
-- **语言**：Python 3.9+（目标 3.9 兼容，CI 跑 3.9/3.13）
+- **语言**：Python 3.11+（v0.2.0 起提基线，因 `tomllib` 3.11 入 stdlib，保零依赖）
 - **构建**：hatchling（`pyproject.toml` 声明，`src/` 布局，版本号动态读取 `__init__.py`）
 - **运行时依赖**：**零** —— 仅用标准库（`subprocess`、`urllib`、`pathlib`、`ctypes`、`argparse`、`json`、`shutil`）。
 - **外部程序依赖**：`yt-dlp`（必需，找不到则报错退出）、`ffmpeg`（可选，缺失则降级跳过音频提取/容器修复）。
@@ -112,6 +112,18 @@
 - **判断标准**（Cantrill）：每次改动前问"这让系统更简单了，还是只是更大了？"默认答案是"不加"。验证到边际收益递减就停。
 - **教训**：S 级不是"更多"，是"不能再少"。最好的工程总是诞生于约束——人类的有限时间迫使开发清晰抽象，LLM 的零成本倾向于堆叠垃圾千层饼。
 
+### 2.17 TOML 配置文件化（v0.2.0）
+- **选型**：用 TOML 而非 INI/JSON/YAML——TOML 是 Python 生态标准（PEP 518/621），`tomllib` 3.11 入 stdlib，零依赖约束保持。
+- **版本基线提升**：`requires-python` 从 3.9 提到 3.11。3.9 发布于 2020，2026 年提 3.11 合理。CI 矩阵同步改为 3.11 + 3.13。
+- **配置优先级**：CLI 参数 > `config.toml` > 内置默认值。CLI 参数用 `default=None` 区分"未指定"和"显式传空"，`_merge_settings()` 据此决定是否用配置值。
+- **文件位置**：`config_dir() / config.toml`，与 cookie 同目录。`--config FILE` 可覆盖路径。
+- **模块**：`src/bili_dl/settings.py`——`Settings` dataclass + `load(path)` 函数。纯逻辑，返回 Settings 对象，无 ui 调用。
+
+### 2.18 批量下载（v0.2.0）
+- **接口**：`--batch-file FILE`，读取文本文件，每行一个 URL，`#` 开头为注释，空行跳过。
+- **实现**：`cli._read_batch_urls()` 解析文件 → `cli._batch_download()` 顺序下载并统计成功/失败数。
+- **返回码**：全部成功返回 0，任一失败返回 1。空文件返回 0（无 URL 不是错误）。
+
 ## 3. 项目结构
 
 ```
@@ -126,9 +138,10 @@ bili-dl/
 ├── src/bili_dl/
 │   ├── __init__.py                # __version__（hatchling dynamic version 源）
 │   ├── __main__.py                # python -m bili_dl
-│   ├── cli.py                     # 控制器 + REPL + main() — 唯一展示层（ui.* 只在此调）
+│   ├── cli.py                     # 控制器 + REPL + main() + 配置合并 + 批量下载 — 唯一展示层（ui.* 只在此调）
 │   ├── config.py                  # 纯常量，无可变状态
-│   ├── paths.py                   # 跨平台路径（Win/macOS/Linux）
+│   ├── paths.py                   # 跨平台路径（Win/macOS/Linux）+ config_file_path()
+│   ├── settings.py                # TOML 配置文件加载（tomllib，纯逻辑，无 ui）
 │   ├── cookiesource.py            # Cookie 源文件检测 + 提取导入（纯逻辑，无 ui）
 │   ├── cookiestore.py             # Cookie 校验 + ensure_cookie 编排（纯逻辑，无 ui）
 │   ├── ffmpeg.py                  # ffprobe/ffmpeg 探测 + 零损失重封装/提取（纯逻辑，无 ui）
@@ -139,8 +152,9 @@ bili-dl/
 │   ├── test_cookiestore.py        # 校验 + ensure_cookie + _nav_probe mock（网络/HTTP/成功）
 │   ├── test_downloader.py         # 参数拼装 + download() mock subprocess
 │   ├── test_ffmpeg.py             # repair/extract mock subprocess 全分支
-│   ├── test_cli.py                # argparse parser + main() mock 依赖检查
+│   ├── test_cli.py                # argparse parser + config 合并 + 批量下载 + main() mock
 │   ├── test_ui.py                 # _init TTY + colorize ANSI
+│   ├── test_settings.py           # TOML 配置加载（missing/complete/partial/malformed）
 │   ├── test_paths.py              # 跨平台路径分支（mock platform）
 │   ├── test_package.py            # 包导入冒烟测试
 │   └── data/sample_cookies_all.txt
@@ -152,7 +166,7 @@ bili-dl/
 ## 4. 关键约定
 
 ### 4.1 依赖方向
-`cli → cookiestore → cookiesource`；`cli → downloader → ffmpeg`；`cli → paths → config`；`cookiestore/cookiesource/ffmpeg/downloader → config`。
+`cli → settings → config`；`cli → cookiestore → cookiesource`；`cli → downloader → ffmpeg`；`cli → paths → config`；`cookiestore/cookiesource/ffmpeg/downloader → config`。
 - `config` 是叶节点（只导出常量），任何模块可依赖它，它不依赖任何内部模块。
 - `ui` 也接近叶节点（仅 `mode_label` 懒导入 `config`）。
 - **`ui` 只被 `cli.py` 依赖**（v0.1.7 起分层架构，逻辑模块不直接调 `ui.*`）。
@@ -223,6 +237,7 @@ uv run python -m build
 - [x] v0.1.7 已发布（2026-06-28）
 - [x] v0.1.8 已发布（2026-06-28）
 - [x] v0.1.9 已发布（2026-06-28）
+- [x] v0.2.0 已发布（2026-06-28）
 
 ### 发版流程（当前）
 > 任何一步不绿不得进入下一步。

@@ -66,3 +66,10 @@ def default_audio_dir() -> Path:
 def ensure_dir(path: Path) -> Path:
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def config_file_path() -> Path:
+    """Path to the user configuration file (config.toml in config_dir)."""
+    from .config import CONFIG_FILENAME
+
+    return config_dir() / CONFIG_FILENAME

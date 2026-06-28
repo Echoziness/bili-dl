@@ -8,7 +8,7 @@ dynamic = ["version"]
 description = "Cross-platform Bilibili video/audio downloader built on yt-dlp + ffmpeg."
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 authors = [{ name = "Echoziness", email = "217080389+Echoziness@users.noreply.github.com" }]
 keywords = ["bilibili", "downloader", "yt-dlp", "ffmpeg", "video", "audio"]
 classifiers = [
@@ -19,8 +19,6 @@ classifiers = [
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -48,7 +46,7 @@ path = "src/bili_dl/__init__.py"
 # ─── ruff ───────────────────────────────────────────────────────
 [tool.ruff]
 line-length = 100
-target-version = "py39"
+target-version = "py311"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
@@ -65,8 +63,9 @@ select = [
 ignore = [
     "E501",     # line-too-long handled by formatter; ruff format respects line-length
     "RUF001",   # ambiguous CJK punctuation — intentional in zh-facing user messages
-    "UP045",    # keep Optional[X] (clearer for py3.9 audience) over X | None
+    "UP045",    # keep Optional[X] for readability over X | None (3.10+ syntax)
     "SIM102",   # collapsible nested if — kept for readability of two-step logic
+    "UP046",    # keep isinstance tuple form for readability
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -80,7 +79,7 @@ addopts = "-ra -q"
 
 # ─── mypy (enforced by CI) ───────────────────────────────────────
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 strict = true
 ignore_missing_imports = true
 files = ["src/bili_dl"]

@@ -17,6 +17,10 @@ USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTM
 # containing bilibili entries will be recognised.
 BILI_COOKIE_FILENAME = "cookies_bilibili.txt"
 
+# User configuration file (TOML format, loaded by settings.py).
+# Lives in the config directory alongside cookies_bilibili.txt.
+CONFIG_FILENAME = "config.toml"
+
 # yt-dlp format selectors
 #   all / v : "b/bv+ba/b"  —— best progressive OR best DASH video+audio
 #   a       : "ba[ext=m4a]/ba"  —— prefer m4a audio stream
