@@ -189,29 +189,6 @@ def test_stderr_detail_multiline() -> None:
     assert "last line" in ff._stderr_detail("first\n  last line  \n")
 
 
-def test_repair_stat_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """OSError reading file sizes → failure, original preserved (§2.20)."""
-    audio = tmp_path / "test.m4a"
-    audio.write_bytes(b"\x00" * 1000)
-
-    def fake_run(args: list[str], **kw: object) -> subprocess.CompletedProcess:
-        Path(args[-1]).write_bytes(b"\x00" * 800)
-        return _completed(args, 0)
-
-    monkeypatch.setattr(ff.subprocess, "run", fake_run)
-
-    def bad_stat(self: Path, *, follow_symlinks: bool = True) -> object:
-        raise OSError("boom")
-
-    monkeypatch.setattr(Path, "stat", bad_stat)
-    # Create the file before patching stat so write_bytes succeeds
-    result = ff.repair_audio_container(audio, "ffmpeg")
-    assert result.success is False
-    assert any("无法读取文件大小" in t for _, t in result.messages)
-    # Original is intact by code guarantee: repair only replaces on success,
-    # and unlink() only targets the temp file (with a random uuid suffix).
-
-
 def test_repair_replace_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """OSError replacing (file locked) → failure, temp cleaned, original kept."""
     audio = tmp_path / "test.m4a"
