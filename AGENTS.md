@@ -198,7 +198,7 @@
 
 ```
 bili-dl/
-├── pyproject.toml                 # hatchling + ruff + pytest 配置（单文件）
+├── pyproject.toml                 # hatchling + ruff + pytest + [dependency-groups] dev（单文件）
 ├── README.md                      # 宣传门面（务必随版本同步功能表）
 ├── CHANGELOG.md                   # Keep a Changelog 格式
 ├── LICENSE                        # MIT + 依赖合规说明
@@ -255,16 +255,24 @@ bili-dl/
 - Conventional Commits 中文风格可接受（项目面向中文用户为主），但英文 commit 便于国际贡献者，建议英文。
 - 任何改动到 cookiesource.py / cookiestore.py / ffmpeg.py 者必须跑对应测试，不得破坏隐私断言。
 
+### 4.5 开发环境规范（v0.3.0 起）
+- **所有 dev 工具都在 `pyproject.toml` 的 `[dependency-groups] dev` 里声明**（pytest/ruff/mypy/coverage），`uv sync` 一键装齐。**禁止**直接往本机全局环境（miniforge 等）pip install 项目相关包——那会让 `uv run <tool>` 静默落到系统环境的旧包（§2.24 环境陷阱）。
+- **开发只通过 `uv run <cmd>`**，不裸用本机 `pytest`/`ruff`/`mypy`。判断标准：`uv run python -c "import shutil; print(shutil.which('ruff'))"` 应指向 `.venv\Scripts`。
+- 装新 dev 依赖：改 `pyproject.toml` 的 `[dependency-groups] dev` → `uv sync` → 提交 `pyproject.toml` + `uv.lock`。
+- `uv.lock` 必须随 pyproject.toml 一起提交（v0.2.6 起已提交，保证可复现构建）。
+- 国内网络 `uv sync` 需走镜像：`uv sync --default-index "https://mirrors.aliyun.com/pypi/simple/"`（pypi.org 直连 TLS 经常握手失败）。换环境跑 sync 若网络超时，先加这个参数。
+- 运行时依赖仍是零（§4.2 硬约束）——dev 组工具不算运行时依赖，它们只进 venv 不打包。
+
 ## 5. 常用命令
 
 ```bash
-# 开发安装 (uv 管理 venv + editable)
-uv venv --python 3.11 .venv
-uv pip install -e . ruff pytest
+# 开发环境（一键装齐项目 + dev 工具到 .venv）
+uv sync --default-index "https://mirrors.aliyun.com/pypi/simple/"  # 国内网络用镜像
 
-# 检验
+# 检验（全部走 .venv，绝不碰系统环境）
 uv run ruff check src tests
 uv run ruff format --check src tests
+uv run mypy src/bili_dl
 uv run pytest -q
 
 # 实测下载（需 yt-dlp + ffmpeg，且 cookie 目录有 cookies_bilibili.txt）

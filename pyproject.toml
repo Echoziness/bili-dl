@@ -82,3 +82,12 @@ python_version = "3.11"
 strict = true
 ignore_missing_imports = true
 files = ["src/bili_dl"]
+
+# ─── dev tooling (uv sync installs these) ────────────────────────
+[dependency-groups]
+dev = [
+    "pytest>=7",
+    "ruff",
+    "mypy",
+    "coverage",
+]
