@@ -27,8 +27,10 @@ permission denied, disk full, etc.).
 from __future__ import annotations
 
 import contextlib
+import os
 import shutil
 import subprocess
+import sys
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -78,6 +80,55 @@ def _stderr_detail(stderr: str) -> str:
     if lines:
         return f": {lines[-1]}"
     return ""
+
+
+def _cfa_enabled() -> bool:
+    """True if Windows Controlled Folder Access is enabled (registry probe).
+
+    Returns False on non-Windows, on read errors, or when the registry
+    value is missing/not 1. Best-effort — never raises.
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        import winreg
+
+        key = winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SOFTWARE\Microsoft\Windows Defender\Windows Defender Exploit Guard"
+            r"\Controlled Folder Access",
+        )
+        try:
+            value, _ = winreg.QueryValueEx(key, "EnableControlledFolderAccess")
+            return int(value) == 1
+        finally:
+            winreg.CloseKey(key)
+    except OSError:
+        return False
+
+
+def _cfa_hint(path: Path) -> Optional[str]:
+    """Return a targeted hint when *path* couldn't be written and the cause
+    is plausibly Windows Controlled Folder Access (CFA).
+
+    CFA blocks unsigned apps from writing library folders (~/Videos, ~/Music)
+    and *silently disguises* the denial as ``No such file or directory`` —
+    the parent dir exists and is writable, yet the file is never created.
+    We detect exactly that signature: parent exists + writable + CFA enabled.
+    Returns a message for the user or ``None`` to stay quiet.
+    """
+    if sys.platform != "win32":
+        return None
+    parent = path.parent
+    if not parent.exists() or not os.access(parent, os.W_OK):
+        return None
+    if not _cfa_enabled():
+        return None
+    return (
+        "[提示] 目标目录存在且可写，但文件未能创建 —— 可能被 Windows 受控文件夹访问"
+        "（Controlled Folder Access）拦截（常见于 ffmpeg 升级后新二进制未被放行）。"
+        "请将 ffmpeg/yt-dlp 加入白名单，见 README「Windows: Controlled Folder Access」。"
+    )
 
 
 def repair_audio_container(audio_path: Path, ffmpeg: str) -> RepairResult:
@@ -145,10 +196,13 @@ def repair_audio_container(audio_path: Path, ffmpeg: str) -> RepairResult:
     if temp_path.exists():
         with contextlib.suppress(OSError):
             temp_path.unlink()
-    return RepairResult(
-        success=False,
-        messages=[("error", f"[失败] 容器修复失败{_stderr_detail(stderr)}，保留原文件")],
-    )
+    msgs: list[tuple[str, str]] = [
+        ("error", f"[失败] 容器修复失败{_stderr_detail(stderr)}，保留原文件")
+    ]
+    hint = _cfa_hint(audio_path)
+    if hint:
+        msgs.append(("warn", hint))
+    return RepairResult(success=False, messages=msgs)
 
 
 def extract_audio(video_path: Path, audio_dir: Path, ffmpeg: str) -> ExtractResult:
@@ -186,10 +240,11 @@ def extract_audio(video_path: Path, audio_dir: Path, ffmpeg: str) -> ExtractResu
     )
 
     if rc != 0 or not audio_path.exists():
-        return ExtractResult(
-            success=False,
-            messages=[("error", f"[失败] 音频提取失败{_stderr_detail(stderr)}")],
-        )
+        msgs: list[tuple[str, str]] = [("error", f"[失败] 音频提取失败{_stderr_detail(stderr)}")]
+        hint = _cfa_hint(audio_path)
+        if hint:
+            msgs.append(("warn", hint))
+        return ExtractResult(success=False, messages=msgs)
 
     # Standardise container for foobar2000 friendliness (same as the `a` path)
     repair = repair_audio_container(audio_path, ffmpeg)

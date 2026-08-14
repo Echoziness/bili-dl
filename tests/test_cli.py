@@ -461,7 +461,7 @@ def test_main_ensure_dir_fails(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_main_top_level_exception_wrapped(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.Capture
 ) -> None:
-    """Unexpected exceptions are caught and reported with the issues URL."""
+    """Unexpected exceptions are caught, traced, and reported with the issues URL."""
 
     def boom(argv: list[str] | None) -> int:
         raise RuntimeError("boom")
@@ -470,6 +470,9 @@ def test_main_top_level_exception_wrapped(
     assert cli.main([]) == 1
     err = capsys.readouterr().err
     assert "未预期" in err
+    assert "RuntimeError: boom" in err  # full stack trace, not bare message
+    assert "Traceback" in err
+    assert "环境: bili-dl" in err
     assert "github.com/Echoziness/bili-dl/issues" in err
 
 

@@ -209,3 +209,118 @@ def test_repair_replace_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     assert any("无法替换" in t for _, t in result.messages)
     assert audio.exists()
     assert not list(tmp_path.glob("_temp_test_*.m4a"))  # temp cleaned up
+
+
+# ─── CFA diagnosis (v0.3.0) ───────────────────────────────────────────────────
+
+
+def test_cfa_enabled_false_non_windows(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ff.sys, "platform", "linux")
+    assert ff._cfa_enabled() is False
+
+
+def test_cfa_enabled_registry_returns_1(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ff.sys, "platform", "win32")
+
+    class _FakeKey:
+        def __enter__(self) -> _FakeKey:
+            return self
+
+        def __exit__(self, *a: object) -> None:
+            return None
+
+    class _FakeWinreg:
+        HKEY_LOCAL_MACHINE = 0x80000002
+
+        def OpenKey(self, *a: object, **kw: object) -> _FakeKey:
+            return _FakeKey()
+
+        def QueryValueEx(self, *a: object) -> tuple[int, int]:
+            return (1, 4)
+
+        def CloseKey(self, *a: object) -> None:
+            return None
+
+    import sys
+
+    monkeypatch.setitem(sys.modules, "winreg", _FakeWinreg())
+    assert ff._cfa_enabled() is True
+
+
+def test_cfa_enabled_registry_returns_0(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ff.sys, "platform", "win32")
+
+    class _FakeKey:
+        def __enter__(self) -> _FakeKey:
+            return self
+
+        def __exit__(self, *a: object) -> None:
+            return None
+
+    class _FakeWinreg:
+        HKEY_LOCAL_MACHINE = 0x80000002
+
+        def OpenKey(self, *a: object, **kw: object) -> _FakeKey:
+            return _FakeKey()
+
+        def QueryValueEx(self, *a: object) -> tuple[int, int]:
+            return (0, 4)
+
+        def CloseKey(self, *a: object) -> None:
+            return None
+
+    import sys
+
+    monkeypatch.setitem(sys.modules, "winreg", _FakeWinreg())
+    assert ff._cfa_enabled() is False
+
+
+def test_cfa_hint_only_when_blocked(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hint fires only when dir exists + writable + CFA on."""
+    monkeypatch.setattr(ff.sys, "platform", "win32")
+    target = tmp_path / "out.m4a"
+
+    # CFA off → no hint
+    monkeypatch.setattr(ff, "_cfa_enabled", lambda: False)
+    assert ff._cfa_hint(target) is None
+
+    # CFA on → hint fires
+    monkeypatch.setattr(ff, "_cfa_enabled", lambda: True)
+    hint = ff._cfa_hint(target)
+    assert hint is not None
+    assert "受控文件夹访问" in hint
+
+    # Parent missing → no hint (file not created for a different reason)
+    monkeypatch.setattr(ff.os, "access", lambda *a, **kw: True)
+    assert ff._cfa_hint(tmp_path / "missing" / "out.m4a") is None
+
+
+def test_cfa_hint_non_windows(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ff.sys, "platform", "linux")
+    monkeypatch.setattr(ff, "_cfa_enabled", lambda: True)
+    assert ff._cfa_hint(tmp_path / "out.m4a") is None
+
+
+def test_repair_failure_includes_cfa_hint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """ffmpeg fails to write output → repair failure message carries the hint."""
+    audio = tmp_path / "test.m4a"
+    audio.write_bytes(b"\x00" * 1000)
+    monkeypatch.setattr(
+        ff.subprocess, "run", lambda args, **kw: _completed(args, 1, "No such file or directory")
+    )
+    monkeypatch.setattr(ff, "_cfa_hint", lambda path: "[提示] CFA 拦截")
+    result = ff.repair_audio_container(audio, "ffmpeg")
+    assert result.success is False
+    assert any("[提示] CFA 拦截" in t for _, t in result.messages)
+
+
+def test_extract_failure_includes_cfa_hint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"\x00")
+    monkeypatch.setattr(
+        ff.subprocess, "run", lambda args, **kw: _completed(args, 1, "No such file or directory")
+    )
+    monkeypatch.setattr(ff, "_cfa_hint", lambda path: "[提示] CFA 拦截")
+    result = ff.extract_audio(video, tmp_path / "audio", "ffmpeg")
+    assert result.success is False
+    assert any("[提示] CFA 拦截" in t for _, t in result.messages)

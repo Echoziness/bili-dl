@@ -165,6 +165,35 @@
 - **测试锚定**：`test_empty_proxy_in_config_blocks_env_proxy` 断言 `proxy=""` 不被 env 覆盖；`test_load_empty_proxy_preserved` 断言 `""` 不被 `or None` 吞掉。
 - **教训**：`or None` 只能用于「不存在」与「空串」语义等价时。凡是用户可能主动写空值的配置字段，都要区分「没写」（None）与「写了但为空」（""）——否则显式意图会被静默反转，用户极难自我诊断。
 
+### 2.23 Windows 换行符假 diff：`.gitattributes` 必须显式声明（v0.3.0 踩坑）
+- **现象**：`git status` 报 `config.py`/`paths.py` 已修改，但 `git diff`（含 `--ignore-all-space`）完全为空。用户困惑于"有改动却 diff 不到"。
+- **根因**：仓库此前**只有 `core.autocrlf=true`，没有 `.gitattributes`**。autocrlf 只在读写时做 CRLF↔LF 转换，但 index 里缓存的是 stat（size/mtime），记录的是 CRLF 时代的文件大小；工作区某次被工具改写为 LF 后，stat 不匹配 → `git status` 判 modified，而 `git diff` 按内容比较（LF 规范化后一致）→ 显示无差异。两者结论冲突。
+- **解法（v0.3.0）**：新增 `.gitattributes`：
+  ```gitattributes
+  * text=auto
+  *.py text eol=lf
+  ```
+  然后 `git add --renormalize .` 统一 index 规范化，删除工作区残留 CRLF 文件后 `git checkout HEAD -- <file>` 强制重建（注意：`git checkout-index -f` 不会重写 stat 未变的文件，需先删再 checkout）。
+- **验证**：全库 `src/**/*.py` + `tests/**/*.py` 字节扫描 CR=0（纯 LF）；160 测试通过、ruff 干净。
+- **教训**：跨平台仓库不声明 `.gitattributes` 等于把行尾策略交给各贡献者机器的 autocrlf 猜测。`eol=lf` 明确后，Windows/WSL/Linux 提交的行尾由仓库统一控制，假 diff 从根源消除。
+- **关联**：本项目 §2.9 的 CJK 编码策略与行尾无关（那是指子进程 stdout 解码，非文件存储），但两者常被混淆。文件存储行尾用 `.gitattributes` 管，进程间文本交换用宿主 locale。
+
+### 2.24 Windows 受控文件夹访问（CFA）静默拦截 ffmpeg（v0.3.0 踩坑）
+- **现象**：`bili-dl --all` 下载视频成功，但音频提取/容器修复失败。首个报错 `[out#0/ipod] Could not write header ... Bad file descriptor`，随后连锁 `UnicodeDecodeError: 'gbk' codec ...` 和 `'NoneType' object has no attribute 'strip'`——三个错误看似三种 bug，实则全是同一根因的连锁反应。
+- **根因**：Windows Defender **受控文件夹访问（Controlled Folder Access, CFA）** 已启用（注册表 `EnableControlledFolderAccess=1`）。CFA 拦截**未签名**程序写入库目录（`~/Videos`、`~/Music` 等），且**静默伪装**——不是返回"拒绝访问"，而是让程序看到 `No such file or directory`（PowerShell `Set-Content` 同样报 `Could not find file`，而 cmd/Python 能写，极具迷惑性）。
+- **触发条件**：ffmpeg 升级换新二进制即触发（旧版曾放行/白名单过，新版 9.0.1 未签名被判未知）。`yt-dlp`/miniforge `python.exe` 也全部 `NotSigned`。**任何"换了个 exe"的操作都可能再次触发。**
+- **关键坑（junction）**：scoop 的 `current` 是 junction 指向真实版本目录（`C:\Users\16697\scoop\apps\ffmpeg\current` → `...\9.0.1`）。CFA 事件日志记录的是**解析后的真实路径** `...\ffmpeg\9.0.1\bin\ffmpeg.exe`，因此把 `current\bin\ffmpeg.exe` 加入 `Add-MpPreference -ControlledFolderAccessAllowedApplications` **无效**——必须加真实版本路径。ffmpeg 升级换版本号后需重加。
+- **解法**：管理员 `Add-MpPreference -ControlledFolderAccessAllowedApplications <真实路径>` 白名单 ffmpeg/ffprobe/ffplay（PowerShell 7 提权：`Start-Process powershell -Verb RunAs -EncodedCommand`）。或 Windows 安全中心 GUI → 受控文件夹访问 → 允许应用。验证：`ffmpeg -y -i in.m4a -map 0:a -c:a copy out.m4a` 写入 `~/Music` 成功。
+- **定位方法**：查 `Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-Windows Defender/Operational'; Id=1123}` 能看到精确的"已阻止...通过受控文件夹访问权限...路径..."事件，比猜错误码快得多。
+- **产品决策**：不因此改默认输出目录——CFA 是系统安全配置不是产品 bug，改目录（如 `~/Downloads`）只是绕开不根治，且破坏 Videos/Music 库目录的用户预期。README 加了 Windows 提示段落（v0.3.0），根治是用户自己放行。
+- **教训**：外部程序写文件失败时，如果错误是"文件不存在"但目录明明可写，先怀疑安全软件（CFA/杀毒）而非路径本身。三连环报错（Bad fd → 编码 → NoneType）往往源自第一个被掩盖的 OS 拦截，逐层溯源优于修表面。
+- **v0.3.0 代码增强（把教训变成自诊断）**：
+  - `ffmpeg.py` 新增 `_cfa_enabled()`（winreg 读 `EnableControlledFolderAccess`，非 win32/读失败返回 False）和 `_cfa_hint()`——判定条件刻意苛刻：父目录存在 **且** 可写（`os.access W_OK`）**且** CFA 开启，三者同时成立才提示，避免误报。
+  - `repair_audio_container` / `extract_audio` 失败分支追加 hint（`[提示] ...` warn 消息），用户不再对裸 `No such file or directory` 抓瞎。
+  - `cli.main` 顶层 except 从只打印 `{e}` 改为 `traceback.print_exc(file=sys.stderr)` + 环境行（版本/Python/platform）。**注意**：此前 §2.20 特意"不喷栈"，v0.3.0 改为喷完整栈——因为裸消息无法诊断，栈进 stderr 不影响 stdout 管道。
+  - 测试锚定：`test_ffmpeg.py::test_cfa_enabled_registry_returns_1/0`（mock `sys.modules["winreg"]` 注入假模块——因 `winreg` 是函数内 import，`ff.winreg` 在非 win32 不存在，只能注入 `sys.modules`）；`test_cfa_hint_*`；`test_cli.py::test_main_top_level_exception_wrapped` 断言栈与环境行。
+  - **环境陷阱**：venv 只装了 pytest 没有 coverage，`uv run coverage` 会静默落到系统环境（miniforge）的旧 bili-dl 上导致假失败。排障时先 `uv pip install coverage` 再测。venv 里也应补装 ruff/mypy 避免路径错乱。
+
 ## 3. 项目结构
 
 ```
@@ -174,6 +203,7 @@ bili-dl/
 ├── CHANGELOG.md                   # Keep a Changelog 格式
 ├── LICENSE                        # MIT + 依赖合规说明
 ├── .python-version                # pyenv/uv 用，固定 3.11（v0.2.0 起基线）
+├── .gitattributes                 # * text=auto + *.py eol=lf（行尾统一，v0.3.0 起，见 §2.23）
 ├── .gitignore                     # 含 cookies_*.txt 与媒体文件，防泄密
 ├── AGENTS.md                      # 本文件
 ├── src/bili_dl/
@@ -283,6 +313,7 @@ uv run python -m build
 - [x] v0.2.7 已发布（2026-06-28）
 - [x] v0.2.8 已发布（2026-06-28）
 - [x] v0.2.9 已发布（2026-06-28）
+- [x] v0.3.0 已发布（2026-08-14）
 
 ### 发版流程（当前）
 > 任何一步不绿不得进入下一步。

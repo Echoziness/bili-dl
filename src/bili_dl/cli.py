@@ -24,6 +24,7 @@ import argparse
 import os
 import sys
 import tomllib
+import traceback
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -310,9 +311,11 @@ def _repl(opts: Options, ytdlp: str, ffmpeg_bin: Optional[str]) -> int:
 def main(argv: Optional[list[str]] = None) -> int:
     try:
         return _main_impl(argv)
-    except Exception as e:
-        ui.error(f"[错误] 发生未预期错误: {e}")
-        ui.info("请将以上错误信息提交到 https://github.com/Echoziness/bili-dl/issues")
+    except Exception:
+        ui.error("[错误] 发生未预期错误，堆栈如下:")
+        traceback.print_exc(file=sys.stderr)
+        ui.info(f"环境: bili-dl {__version__} | Python {sys.version.split()[0]} | {sys.platform}")
+        ui.info("请将以上完整堆栈提交到 https://github.com/Echoziness/bili-dl/issues")
         return 1
 
 

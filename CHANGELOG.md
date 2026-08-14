@@ -5,6 +5,53 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-08-14
+
+### Changed — Line-ending normalization
+
+- Added `.gitattributes` (`* text=auto` + `*.py text eol=lf`) so all Python
+  files are committed and checked out as **LF** regardless of platform.
+  Previously the repo relied solely on `core.autocrlf=true`, which left the
+  working tree in a mixed CRLF/LF state: `git status` reported phantom
+  modifications (index stat cached CRLF sizes) that `git diff` showed as
+  empty — confusing on both Windows and WSL.
+- Renormalized the whole tree (`git add --renormalize`) and rebuilt the two
+  stale CRLF files (`src/bili_dl/__init__.py`, `tests/test_paths.py`) as LF.
+
+### Docs — Windows Controlled Folder Access caveat
+
+- Added a README section explaining that Windows Defender CFA silently
+  blocks unsigned `ffmpeg`/`yt-dlp` from writing library folders
+  (`~/Videos`, `~/Music`), failing with a misleading `Could not write header
+  ... No such file or directory`. Includes how to whitelist the binaries and
+  the pitfall that the `current` junction path does **not** match CFA's
+  resolved real path (AGENTS.md §2.24). No code change — a user's CFA
+  setting is a system config, not a product bug; changing default output
+  dirs to dodge it would be over-fitting to a machine-specific setup.
+
+### Added — Error diagnosis (self-explaining failures)
+
+- **CFA detection on ffmpeg write failure**: `ffmpeg.py` gains
+  `_cfa_enabled()` (registry probe of `EnableControlledFolderAccess`) and
+  `_cfa_hint()` (fires only when the target parent dir exists *and* is
+  writable *and* CFA is on — the exact "silently disguised denial"
+  signature). Both `repair_audio_container` and `extract_audio` now append
+  a targeted hint to their failure messages, so a blocked write says
+  "可能被 Windows 受控文件夹访问拦截" instead of a bare
+  `No such file or directory`.
+- **Top-level unexpected errors now print a full stack trace + environment**
+  info (`bili-dl <version> | Python <ver> | <platform>`) instead of only the
+  exception message — users can copy the complete trace to an issue instead
+  of pasting a one-liner.
+
+### Tests
+
+- 8 new tests (160 → 167): `_cfa_enabled` (non-Windows / registry 1 / 0),
+  `_cfa_hint` (fires only when blocked, non-Windows, missing parent),
+  repair/extract failure messages carry the hint, top-level exception prints
+  traceback + env info.
+- Coverage stays at 98% (was 98%).
+
 ## [0.2.9] - 2026-06-28
 
 ### Fixed — Follow-up from third-party review (3 issues)
@@ -420,3 +467,4 @@ the system *larger* without making it *simpler*.
 [0.2.7]: https://github.com/Echoziness/bili-dl/releases/tag/v0.2.7
 [0.2.8]: https://github.com/Echoziness/bili-dl/releases/tag/v0.2.8
 [0.2.9]: https://github.com/Echoziness/bili-dl/releases/tag/v0.2.9
+[0.3.0]: https://github.com/Echoziness/bili-dl/releases/tag/v0.3.0

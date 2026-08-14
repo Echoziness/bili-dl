@@ -147,6 +147,26 @@ bili-dl --batch-file urls.txt
 - `cookies_bilibili.txt` is created with a timestamped backup before any
   overwrite.
 
+## Windows: Controlled Folder Access
+
+Windows Defender's *Controlled Folder Access* (CFA) blocks unsigned apps from
+writing to library folders (`~/Videos`, `~/Music`, etc.) by default. It fails
+**silently** — ffmpeg may crash with a confusing `Could not write header ... No
+such file or directory` while the file is never created.
+
+If you enabled CFA and downloads fail after the video is written:
+
+1. Open **Windows Security → Virus & threat protection → Ransomware
+   protection → Manage ransomware protection**
+2. Under *Controlled folder access*, click **Allow an app through controlled
+   folder access → Add an allowed app**
+3. Add `ffmpeg.exe` (and `yt-dlp.exe`) — use the **real path**, not a symlink:
+   - ffmpeg (scoop): `%USERPROFILE%\scoop\apps\ffmpeg\<version>\bin\ffmpeg.exe`
+   - yt-dlp: `%USERPROFILE%\miniforge3\Scripts\yt-dlp.exe` (or your install)
+
+> **Tip**: adding the `current` junction path does **not** work — CFA matches
+> the resolved real path (e.g. `...\ffmpeg\9.0.1\bin\ffmpeg.exe`).
+
 ## Limitations
 
 - **Single video only** — `--no-playlist` is always passed, so multi-P
