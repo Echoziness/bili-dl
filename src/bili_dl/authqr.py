@@ -59,7 +59,7 @@ class QrPollResult:
 
 
 def qrcode_available() -> bool:
-    """Whether the optional QR renderer is installed."""
+    """Whether the bundled QR renderer is importable in this installation."""
     try:
         import qrcode  # noqa: F401
     except ImportError:
@@ -70,8 +70,9 @@ def qrcode_available() -> bool:
 def render_terminal_qr(url: str) -> str:
     """Return a Unicode block QR image for *url*.
 
-    ``qrcode`` is an optional dependency so the downloader itself remains
-    dependency-free.  Call :func:`qrcode_available` before this function.
+    ``qrcode`` is a standard runtime dependency. Call
+    :func:`qrcode_available` first so a damaged installation gets a useful
+    recovery message instead of an import traceback.
     """
     import qrcode
 

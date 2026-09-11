@@ -85,7 +85,7 @@ class _RefreshCsrfParser(HTMLParser):
 
 
 def crypto_available() -> bool:
-    """Whether the optional, audited RSA implementation is available."""
+    """Whether the bundled, audited RSA implementation is importable."""
     try:
         import cryptography  # noqa: F401
     except ImportError:

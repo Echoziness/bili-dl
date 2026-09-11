@@ -46,7 +46,7 @@ def test_correspond_parser_extracts_only_target_div() -> None:
     assert parser.value == "csrf-token"
 
 
-def test_correspond_path_is_rsa_oaep_hex_when_optional_extra_is_installed() -> None:
+def test_correspond_path_is_rsa_oaep_hex_with_runtime_dependency() -> None:
     pytest.importorskip("cryptography")
     path, error = authrefresh._correspond_path(1_700_000_000_000)
     assert error is None
