@@ -29,6 +29,42 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: pip install build
+      - run: pip install build twine
       - run: python -m build
+      - run: twine check dist/*
+      - name: Reject unexpected source-distribution files
+        shell: python
+        run: |
+          import tarfile
+          from pathlib import Path
+
+          forbidden = {
+              "tmp",
+              "output",
+              "auth_state.json",
+              "cookies_all.txt",
+              "cookies_bilibili.txt",
+              ".auth_state.lock",
+          }
+          for archive in Path("dist").glob("*.tar.gz"):
+              with tarfile.open(archive) as package:
+                  unsafe = [
+                      name
+                      for name in package.getnames()
+                      if any(part in forbidden or part.startswith(".env") for part in Path(name).parts)
+                  ]
+              if unsafe:
+                  raise SystemExit(f"unsafe source-distribution entries: {unsafe}")
+      - run: pip install dist/*.whl
+      - run: bili-dl -V
+      - name: Verify tag matches package version
+        shell: python
+        run: |
+          import os
+          from importlib.metadata import version
+
+          expected = f"v{version('bili-dl')}"
+          actual = os.environ["GITHUB_REF_NAME"]
+          if actual != expected:
+              raise SystemExit(f"tag {actual!r} does not match package version {expected!r}")
       - uses: pypa/gh-action-pypi-publish@release/v1

@@ -43,6 +43,17 @@ Changelog = "https://github.com/Echoziness/bili-dl/blob/main/CHANGELOG.md"
 [tool.hatch.build.targets.wheel]
 packages = ["src/bili_dl"]
 
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/tests",
+    "/README.md",
+    "/CHANGELOG.md",
+    "/LICENSE",
+    "/pyproject.toml",
+    "/uv.lock",
+]
+
 [tool.hatch.version]
 path = "src/bili_dl/__init__.py"
 

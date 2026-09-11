@@ -7,6 +7,8 @@ __pycache__/
 # Distribution / packaging
 build/
 dist/
+/output/
+/tmp/
 *.egg-info/
 .eggs/
 wheels/

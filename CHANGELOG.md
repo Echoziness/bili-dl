@@ -62,6 +62,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   credentials. `--insecure` remains deliberately limited to yt-dlp: login and
   session APIs never disable TLS verification.
 
+### Fixed — Deterministic release artifacts
+
+- The source distribution now uses an explicit allowlist, so local research,
+  generated output, `.env` files, Cookies, and authentication state cannot be
+  captured from a developer's working tree and uploaded to PyPI.
+- The publish workflow now checks package metadata, rejects forbidden sdist
+  entries, installs and starts the built wheel, and verifies that the Git tag
+  exactly matches the package version before invoking PyPI trusted publishing.
+
 ### Tests
 
 - Added protocol and transaction coverage for QR refresh-token receipt,

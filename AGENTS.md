@@ -208,11 +208,16 @@
 - **代理贯穿**：代理完全由用户管理，项目不探测可用性、不自动选择、不改写系统设置。CLI/config/env 代理只允许由 `cli._resolve_proxy()` 解析一次，优先级固定为 CLI > config > `HTTPS_PROXY` > `https_proxy` > `HTTP_PROXY` > `http_proxy` > 空串。解析后的值必须显式传到下载、扫码、nav 校验与续期全链路；认证/存储层的 `proxy` 参数保持 keyword-only。`proxy=""` 明确禁用环境代理，`None` 只供库调用表示沿用 urllib 默认环境。
 - **TLS 边界**：`-k/--insecure` 只传给 yt-dlp，绝不作用于登录与会话 API；认证传输始终使用系统默认 TLS 校验。
 
+### 2.26 sdist 必须使用白名单（v0.4.0）
+- **现象**：Hatch 默认 sdist 会读取工作区内容；即使 `output/`、`tmp/` 没有被 Git 跟踪，本地 `uv build` 仍曾把研究文档、整个第三方仓库和其中的 `.env*` 文件装入 tar.gz。wheel 因已指定 `packages = ["src/bili_dl"]` 不受影响，但手动上传该 sdist 会造成供应链污染和潜在凭证泄露。
+- **解法**：`pyproject.toml` 的 `[tool.hatch.build.targets.sdist]` 使用显式 `include` 白名单，只允许 `src/`、`tests/`、README、CHANGELOG、LICENSE、pyproject 与 uv.lock；根目录 `/output/`、`/tmp/` 同时加入 `.gitignore`，但白名单才是发布安全边界。
+- **发布守门**：`publish.yml` 在上传前必须依次执行 `twine check`、扫描 sdist 禁止 `tmp/output/.env/Cookie/auth_state`、安装并启动 wheel、校验 `v<version>` 标签与包版本完全一致。不得只因 CI 源码测试通过就跳过产物验证。
+
 ## 3. 项目结构
 
 ```
 bili-dl/
-├── pyproject.toml                 # hatchling + ruff + pytest + [dependency-groups] dev（单文件）
+├── pyproject.toml                 # hatchling（wheel/sdist 白名单）+ 工具链 + dev 依赖
 ├── README.md                      # 宣传门面（务必随版本同步功能表）
 ├── CHANGELOG.md                   # Keep a Changelog 格式
 ├── LICENSE                        # MIT + 依赖合规说明
@@ -363,7 +368,8 @@ uv run python -m build
    uv run pytest                      # 单元测试
    ```
    - 若 format 报 `Would reformat`，先 `uv run ruff format src tests` 再提交。
-4. `git commit -m "release: vX.Y.Z"`
-5. `git tag -a vX.Y.Z -m "vX.Y.Z"` → push commit + tag
-6. 等 CI 全绿（lint[ruff+mypy] + test[3平台×2版本] + coverage + Publish 前置）确认无红色
-7. `gh release create vX.Y.Z --title "vX.Y.Z" --notes "<从 CHANGELOG 取本版本段落>"` 创建 Release
+4. `uv build` 后检查 wheel/sdist 内容并执行 `twine check dist/*`；产物不得包含工作区临时文件或凭证。
+5. `git commit -m "release: vX.Y.Z"`
+6. 先 push 主分支并等待 CI 全绿，再 `git tag -a vX.Y.Z -m "vX.Y.Z"` 并 push tag。
+7. 等 Publish 工作流全绿并从 PyPI 实际安装验证。
+8. `gh release create vX.Y.Z --title "vX.Y.Z" --notes "<从 CHANGELOG 取本版本段落>"` 创建 Release。
