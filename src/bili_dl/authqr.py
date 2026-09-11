@@ -1,4 +1,4 @@
-"""Minimal Bilibili Web QR login transport.
+"""Minimal Bilibili Web QR login protocol.
 
 This module creates a standalone Bilibili Web session without reading a
 browser profile.  Its caller can persist the Web ``refresh_token`` returned
@@ -11,22 +11,19 @@ rendered QR string for :mod:`bili_dl.cli` to present.
 from __future__ import annotations
 
 import http.cookiejar
-import json
 import time
-import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from . import transport
 from .config import (
     QR_GENERATE_API,
     QR_LOGIN_MAX_POLLS,
     QR_POLL_API,
     QR_POLL_INTERVAL,
     QR_TIMEOUT,
-    REFERER,
-    USER_AGENT,
 )
 
 
@@ -83,38 +80,16 @@ def render_terminal_qr(url: str) -> str:
     return "\n".join("".join("██" if cell else "  " for cell in row) for row in matrix)
 
 
-def _request_json(
-    opener: urllib.request.OpenerDirector, request: urllib.request.Request
-) -> tuple[Optional[dict[str, Any]], Optional[str]]:
-    """Fetch one Bilibili endpoint and return parsed JSON or a safe error code."""
-    try:
-        with opener.open(request, timeout=QR_TIMEOUT) as response:
-            body = response.read().decode("utf-8", errors="replace")
-        data = json.loads(body)
-    except urllib.error.HTTPError as exc:
-        return None, f"HTTP {exc.code}"
-    except urllib.error.URLError:
-        return None, "网络连接失败"
-    except OSError:
-        return None, "网络连接失败"
-    except json.JSONDecodeError:
-        return None, "B 站返回非 JSON 内容"
-    if not isinstance(data, dict):
-        return None, "B 站返回了异常数据"
-    return data, None
-
-
-def _request(url: str) -> urllib.request.Request:
-    return urllib.request.Request(url, headers={"Referer": REFERER, "User-Agent": USER_AGENT})
-
-
-def start() -> QrStartResult:
+def start(*, proxy: Optional[str] = None) -> QrStartResult:
     """Request a new Bilibili Web QR login session."""
     jar = http.cookiejar.CookieJar()
-    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
-    data, error = _request_json(opener, _request(QR_GENERATE_API))
+    opener = transport.cookie_opener(jar, proxy)
+    data, failure = transport.fetch_json(
+        opener, transport.request(QR_GENERATE_API), timeout=QR_TIMEOUT
+    )
     if data is None:
-        return QrStartResult(messages=[("error", f"[登录] 获取二维码失败：{error}")])
+        detail = failure.describe() if failure else "未知错误"
+        return QrStartResult(messages=[("error", f"[登录] 获取二维码失败：{detail}")])
 
     payload = data.get("data")
     if data.get("code") != 0 or not isinstance(payload, dict):
@@ -191,9 +166,12 @@ def poll(session: QrSession, *, sleep: bool = True) -> QrPollResult:
     """Wait for a scan/confirmation and return its Bilibili cookie lines."""
     poll_url = f"{QR_POLL_API}?{urllib.parse.urlencode({'qrcode_key': session.key})}"
     for _ in range(QR_LOGIN_MAX_POLLS):
-        data, error = _request_json(session.opener, _request(poll_url))
+        data, failure = transport.fetch_json(
+            session.opener, transport.request(poll_url), timeout=QR_TIMEOUT
+        )
         if data is None:
-            return QrPollResult(False, messages=[("error", f"[登录] 查询扫码状态失败：{error}")])
+            detail = failure.describe() if failure else "未知错误"
+            return QrPollResult(False, messages=[("error", f"[登录] 查询扫码状态失败：{detail}")])
 
         payload = data.get("data")
         if data.get("code") != 0 or not isinstance(payload, dict):

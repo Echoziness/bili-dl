@@ -77,9 +77,9 @@ def test_poll_returns_refresh_token_from_a_successful_qr_login(
         opener=urllib.request.build_opener(),
     )
     monkeypatch.setattr(
-        authqr,
-        "_request_json",
-        lambda opener, request: (
+        authqr.transport,
+        "fetch_json",
+        lambda opener, request, timeout: (
             {"code": 0, "data": {"code": 0, "refresh_token": "refresh-token"}},
             None,
         ),
@@ -102,7 +102,9 @@ def test_poll_keeps_waiting_while_qr_is_scanned_but_unconfirmed(
             ({"code": 0, "data": {"code": 86038, "message": "二维码已失效"}}, None),
         ]
     )
-    monkeypatch.setattr(authqr, "_request_json", lambda opener, request: next(replies))
+    monkeypatch.setattr(
+        authqr.transport, "fetch_json", lambda opener, request, timeout: next(replies)
+    )
     session = authqr.QrSession(
         url="https://example.com/qr",
         key="key",

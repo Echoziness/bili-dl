@@ -4,9 +4,9 @@
 
 ## 1. 技术栈
 
-- **语言**：Python 3.11+（v0.2.0 起提基线，因 `tomllib` 3.11 入 stdlib，保零依赖）
+- **语言**：Python 3.11+（v0.2.0 起提基线，因 `tomllib` 3.11 入 stdlib）
 - **构建**：hatchling（`pyproject.toml` 声明，`src/` 布局，版本号动态读取 `__init__.py`）
-- **运行时依赖**：**零** —— 仅用标准库（`subprocess`、`urllib`、`pathlib`、`ctypes`、`argparse`、`json`、`shutil`）。
+- **运行时依赖**：`qrcode`（本地二维码）、`cryptography`（B 站 RSA-OAEP 续期协议）、`filelock`（跨进程会话事务锁）；HTTP、CLI、配置与彩色输出仍优先使用标准库。
 - **外部程序依赖**：`yt-dlp`（必需，找不到则报错退出）、`ffmpeg`（可选，缺失则降级跳过音频提取/容器修复）。
 - **工具链**：ruff（lint+format）、mypy（strict 模式，CI 强制）、pytest（测试）+ coverage（CI 报告）。
 - **分发**：目标 PyPI，包名 `bili-dl`，脚本入口 `bili-dl`。
@@ -46,7 +46,7 @@
 ### 2.6 nav API 必须伪装浏览器 User-Agent（412 根因，非 SSL）
 - **现象**：Python 版上线后实测每次都走降级（"无法在线验证 Cookie ... 降级为本地格式校验"），而原 bd.ps1 PowerShell 的 `Invoke-RestMethod` 一直能成功显示已登录用户名。曾被误判为本机证书链问题。
 - **根因**：B 站 nav API 对 urllib 默认 UA `Python-urllib/3.x` 返回 **HTTP 412 Precondition Failed**（反爬）。`Invoke-RestMethod` 内部默认带 PowerShell/browser UA 故一直成功。代码的 `except Exception` 把 412 也吞进"网络/SSL 错误"分支，导致降级提示与真实根因描述不符——既误导用户也让 SSL 甩锅。
-- **解法**：`config.py::USER_AGENT` 放一个固定 Chrome UA 字符串；`cookiestore.py` 的 `_nav_probe()` urllib request header 加 `"User-Agent": USER_AGENT`。仅 nav 探测用，yt-dlp 下载阶段自带 UA。
+- **解法**：`config.py::USER_AGENT` 放一个固定 Chrome UA 字符串；当前由 `transport.request()` 统一加入所有 B 站认证/会话请求，`cookiestore._nav_probe()` 不再自行拼请求头。yt-dlp 下载阶段自带 UA。
 - **验证**：实跑 `bili-dl`（无 URL）开头即显示 `[OK] Cookie 有效 | 已登录: <uname>`。
 - **启示**：`except Exception` 太宽会把业务级 HTTP 错误（412/403/404）混进"网络问题"分支。**v0.1.8 已改**：`_nav_probe` 单独 catch `HTTPError` 拿 status，返回 `NavProbeResult(error="http:{status}")`；`validate` 据此报"HTTP 412（可能被风控）"而非笼统"网络/SSL 错误"。
 - **关联**：用户曾因 `-k` 也无效而怀疑证书；`-k` 只影响 yt-dlp 的 `--no-check-certificate`，**对 urllib 探测无影响**（urllib 默认就校验，且本机 CA 没问题）。下次有人误以为证书，先查 UA。
@@ -149,7 +149,7 @@
 
 ### 2.21 审查优化与覆盖率守门（v0.2.7）
 - **背景**：审查发现覆盖率脱节（实测 63% vs 文档 §2.16 写 87%）+ CI 无 fail-under 闸门 + 5 个轻微问题。本轮做系统优化。
-- **覆盖率**：当时从 63% 提升到 **98%**（107→159 测试）。CI `coverage report --fail-under=70` 设闸门，覆盖率下滑会让 CI 变红。2026-09 新增扫码/续期协议后的实测整体覆盖率为 **85%**（209 测试）；新增网络协议的异常分支以 mock 覆盖关键事务，不应把历史 98% 当作当前数字。
+- **覆盖率**：当时从 63% 提升到 **98%**（107→159 测试）。CI `coverage report --fail-under=70` 设闸门，覆盖率下滑会让 CI 变红。2026-09 新增扫码/续期与统一传输层后的实测整体覆盖率为 **87%**（218 测试，transport 96%）；新增网络协议的异常分支以 mock 覆盖关键事务，不应把历史 98% 当作当前数字。
 - **轻微问题修复**：
   - 代理环境变量认大小写（`HTTPS_PROXY`/`https_proxy`/`HTTP_PROXY`/`http_proxy`），符合 curl/git/requests 惯例。Windows 环境变量本身大小写不敏感，Linux/macOS 区分（故大小写优先级测试无法在 Windows 跑，仅测小写被识别）。
   - `settings.load` 对 `insecure` 做 `isinstance(bool)` 校验，非 bool 值（如 `"yes"`、`1`）coerce 为 `None`，防止下游 `cfg.insecure or False` 拾取 truthy 字符串。
@@ -162,6 +162,7 @@
 - **现象（第三方审查发现）**：用户在 `config.toml` 写 `proxy = ""` 想禁用代理，但系统有 `HTTPS_PROXY` 环境变量时，bili-dl 反而走了系统代理。用户「明明禁了代理」却看到代理生效——配置文件语义被实现细节反转。
 - **根因**：`settings.load` 的 `data.get("proxy") or None` 把空字符串（用户显式写 `""`）归一为 `None`（与「未配置该键」不可区分）。下游 `_merge_settings` 对 `None` 的处理是「未配置 → 查环境变量」——空串用户的意图恰恰相反是「我明确要 None，不要查环境」。
 - **解法（v0.2.9）**：移除 `or None`，改为 `data.get("proxy")`。`tomllib` 对不存在的 key 返回 `None`，对 `proxy = ""` 返回 `""`——两者语义不同，应该保留。`_merge_settings` 的 `if proxy is None` 自然区分：`None` → 未配置 → 查 env；`""` → 显式禁用 → 跳过 env。
+- **v0.4 前补全**：仅在配置合并层保留空串还不够；若不给 yt-dlp 传 `--proxy ""`，子进程仍会重新读取继承的代理环境变量。现在 `downloader._common_args()` 始终传 `--proxy <resolved>`，空串使用 yt-dlp 官方定义的“直连”语义；认证 HTTP 则用 `ProxyHandler({})`。两条传输路径由同一个解析结果驱动。
 - **测试锚定**：`test_empty_proxy_in_config_blocks_env_proxy` 断言 `proxy=""` 不被 env 覆盖；`test_load_empty_proxy_preserved` 断言 `""` 不被 `or None` 吞掉。
 - **教训**：`or None` 只能用于「不存在」与「空串」语义等价时。凡是用户可能主动写空值的配置字段，都要区分「没写」（None）与「写了但为空」（""）——否则显式意图会被静默反转，用户极难自我诊断。
 
@@ -203,6 +204,9 @@
 - **并发**：扫码落盘与整段自动续期事务必须持有同目录 `.auth_state.lock` 的跨进程 OS 锁，禁止两个进程交错写 Cookie/state。锁竞争时 login 明确失败并提示重试；下载只跳过本次续期，不得因锁竞争阻断已有有效 Cookie。
 - **续期语义**：不是"永久登录"。只在 Cookie 已通过 nav 校验后、每 UTC 日首次下载前查询 `cookie/info`；B 站要求刷新才走 `correspond → refresh → confirm`。新 Cookie 必须 nav 验证并将新 token 与待确认的旧 token 一并持久化，之后才向 B 站确认旧 token；确认失败时保留待确认状态并在后续下载前重试，不得静默遗忘。网络或协议失败保留当前有效 Cookie 并继续下载。会话已被 B 站撤销时只提示用户显式重跑 login。
 - **依赖**：二维码和 RSA-OAEP 是产品的标准能力，`qrcode`、`cryptography` 随正常安装提供；不得手写密码学或将二维码 URL/凭证发往第三方服务。
+- **统一传输边界**：二维码、`nav`、`cookie/info`、`correspond`、refresh、confirm 的 HTTP 请求只能经 `transport.py`；协议模块不得各自封装 `urlopen`、请求头、超时或错误正文。传输错误只返回不含响应正文/凭证的结构化 `HttpFailure`。
+- **代理贯穿**：代理完全由用户管理，项目不探测可用性、不自动选择、不改写系统设置。CLI/config/env 代理只允许由 `cli._resolve_proxy()` 解析一次，优先级固定为 CLI > config > `HTTPS_PROXY` > `https_proxy` > `HTTP_PROXY` > `http_proxy` > 空串。解析后的值必须显式传到下载、扫码、nav 校验与续期全链路；认证/存储层的 `proxy` 参数保持 keyword-only。`proxy=""` 明确禁用环境代理，`None` 只供库调用表示沿用 urllib 默认环境。
+- **TLS 边界**：`-k/--insecure` 只传给 yt-dlp，绝不作用于登录与会话 API；认证传输始终使用系统默认 TLS 校验。
 
 ## 3. 项目结构
 
@@ -224,8 +228,9 @@ bili-dl/
 │   ├── paths.py                   # 跨平台路径（Win/macOS/Linux）+ config_file_path()
 │   ├── settings.py                # TOML 配置文件加载（tomllib，纯逻辑，无 ui）
 │   ├── authstate.py                # refresh_token 独立状态原子读写（纯逻辑，无 ui）
-│   ├── authqr.py                   # 独立 B 站 Web 扫码登录传输（纯逻辑，无 ui）
+│   ├── authqr.py                   # 独立 B 站 Web 扫码登录协议（纯逻辑，无 ui）
 │   ├── authrefresh.py              # B 站 Web Cookie 每日检查/续期协议（纯逻辑，无 ui）
+│   ├── transport.py                # B 站认证 HTTP 统一边界（请求头/代理/超时/安全错误）
 │   ├── cookiesource.py            # Cookie 源文件检测 + 提取导入（纯逻辑，无 ui）
 │   ├── cookiestore.py             # Cookie 校验 + ensure_cookie 编排（纯逻辑，无 ui）
 │   ├── ffmpeg.py                  # ffprobe/ffmpeg 探测 + 零损失重封装/提取（纯逻辑，无 ui）
@@ -237,6 +242,7 @@ bili-dl/
 │   ├── test_authqr.py              # QR 状态机 + Cookie 域隔离
 │   ├── test_authrefresh.py         # 每日检查/刷新/确认协议 mock
 │   ├── test_authstate.py           # 刷新凭证状态的原子读写
+│   ├── test_transport.py           # 认证传输契约、代理三态与安全错误
 │   ├── test_downloader.py         # 参数拼装 + download() mock subprocess
 │   ├── test_ffmpeg.py             # repair/extract mock subprocess 全分支
 │   ├── test_cli.py                # argparse parser + config 合并 + 批量下载 + main() mock
@@ -253,14 +259,14 @@ bili-dl/
 ## 4. 关键约定
 
 ### 4.1 依赖方向
-`cli → settings → config`；`cli → cookiestore → cookiesource/authstate/authrefresh`；`cli → downloader → ffmpeg`；`cli → paths → config`；`cookiestore/cookiesource/ffmpeg/downloader/authrefresh/authstate → config`。
+`cli → settings → config`；`cli → cookiestore → cookiesource/authstate/authrefresh/transport`；`cli → downloader → ffmpeg`；`cli → paths → config`；`authqr/authrefresh/cookiestore → transport → config`；其他逻辑模块按需依赖 `config`。
 - `config` 是叶节点（只导出常量），任何模块可依赖它，它不依赖任何内部模块。
 - `ui` 也接近叶节点（仅 `mode_label` 懒导入 `config`）。
 - **`ui` 只被 `cli.py` 依赖**（v0.1.7 起分层架构，逻辑模块不直接调 `ui.*`）。
 - 禁止反向依赖或循环导入。
 
 ### 4.2 依赖保持克制
-- `qrcode`（本地二维码渲染）和 `cryptography`（RSA-OAEP）是登录体验与安全所必需的标准依赖；它们随正常安装提供，不要求用户理解 extra。
+- `qrcode`（本地二维码渲染）、`cryptography`（RSA-OAEP）和 `filelock`（跨进程会话锁）是登录体验、协议安全与事务一致性所必需的标准依赖；它们随正常安装提供，不要求用户理解 extra。
 - HTTP 继续使用 `urllib.request`，彩色输出使用 ANSI + `ctypes`；不为便利引入 `requests`、`colorama`、`rich` 等无明确产品收益的依赖。
 - 新依赖必须有清晰的用户价值、安全维护性和移除困难度评估；"零依赖"本身不是目标。
 
@@ -278,7 +284,7 @@ bili-dl/
 - 装新 dev 依赖：改 `pyproject.toml` 的 `[dependency-groups] dev` → `uv sync` → 提交 `pyproject.toml` + `uv.lock`。
 - `uv.lock` 必须随 pyproject.toml 一起提交（v0.2.6 起已提交，保证可复现构建）。
 - 国内网络 `uv sync` 需走镜像：`uv sync --default-index "https://mirrors.aliyun.com/pypi/simple/"`（pypi.org 直连 TLS 经常握手失败）。换环境跑 sync 若网络超时，先加这个参数。
-- 运行时依赖仍是零（§4.2 硬约束）——dev 组工具不算运行时依赖，它们只进 venv 不打包。
+- dev 组工具不进入发布包；正式运行时依赖以 `[project].dependencies` 为唯一事实来源。
 
 ## 5. 常用命令
 

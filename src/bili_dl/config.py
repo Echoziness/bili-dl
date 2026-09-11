@@ -12,9 +12,8 @@ COOKIE_REFRESH_API = "https://passport.bilibili.com/x/passport-login/web/cookie/
 COOKIE_CONFIRM_REFRESH_API = "https://passport.bilibili.com/x/passport-login/web/confirm/refresh"
 CORRESPOND_URL_PREFIX = "https://www.bilibili.com/correspond/1/"
 
-# User-Agent for the nav validity probe. Bilibili returns HTTP 412 to
-# urllib's default "Python-urllib/x.y" UA — must masquerade as a browser.
-# Used only by the cookie validity check; yt-dlp sends its own UA when downloading.
+# Browser identity for Bilibili login and session APIs. The nav endpoint returns
+# HTTP 412 to urllib's default "Python-urllib/x.y" UA. yt-dlp sends its own UA.
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
 
 # Cookie filenames
@@ -42,9 +41,9 @@ MODE_LABELS = {
 
 VALID_MODES = ("all", "v", "a")
 
-# HTTP timeout for the nav validity probe (seconds). 5s matches the original
-# bd.ps1; on flaky networks we gracefully degrade to local-only validation.
-NAV_TIMEOUT = 5.0
+# Default timeout for Bilibili login/session API requests. The nav probe
+# degrades to local validation; renewal failures preserve the current session.
+AUTH_API_TIMEOUT = 5.0
 
 # Web QR login limits.  The Bilibili-issued QR key itself expires after about
 # 180 seconds; polling once a second matches the browser flow without making

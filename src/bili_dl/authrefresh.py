@@ -1,31 +1,27 @@
 """Bilibili's documented Web Cookie-refresh protocol.
 
-This module never touches terminal output or disk.  It uses a CookieJar as the
-protocol source of truth, returns a candidate new session to the store layer,
-and lets that layer validate and persist it before the old refresh token is
-confirmed as spent.
+This module never touches terminal output or writes disk. It loads the current
+Cookie into a CookieJar as the protocol source of truth, returns a candidate
+new session to the store layer, and lets that layer validate and persist it
+before the old refresh token is confirmed as spent.
 """
 
 from __future__ import annotations
 
 import http.cookiejar
-import json
-import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
+from . import transport
 from .config import (
     COOKIE_CONFIRM_REFRESH_API,
     COOKIE_INFO_API,
     COOKIE_REFRESH_API,
     CORRESPOND_URL_PREFIX,
-    NAV_TIMEOUT,
-    REFERER,
-    USER_AGENT,
 )
 
 _PUBLIC_KEY_PEM = b"""-----BEGIN PUBLIC KEY-----
@@ -91,43 +87,6 @@ def crypto_available() -> bool:
     except ImportError:
         return False
     return True
-
-
-def _request(url: str, data: Optional[bytes] = None) -> urllib.request.Request:
-    headers = {"Referer": REFERER, "User-Agent": USER_AGENT}
-    if data is not None:
-        headers["Content-Type"] = "application/x-www-form-urlencoded"
-    return urllib.request.Request(url, data=data, headers=headers)
-
-
-def _request_json(
-    opener: urllib.request.OpenerDirector, request: urllib.request.Request
-) -> tuple[Optional[dict[str, Any]], Optional[str]]:
-    try:
-        with opener.open(request, timeout=NAV_TIMEOUT) as response:
-            body = response.read().decode("utf-8", errors="replace")
-        payload = json.loads(body)
-    except urllib.error.HTTPError as exc:
-        return None, f"HTTP {exc.code}"
-    except (urllib.error.URLError, OSError):
-        return None, "网络连接失败"
-    except json.JSONDecodeError:
-        return None, "B 站返回非 JSON 内容"
-    if not isinstance(payload, dict):
-        return None, "B 站返回了异常数据"
-    return payload, None
-
-
-def _request_text(
-    opener: urllib.request.OpenerDirector, request: urllib.request.Request
-) -> tuple[Optional[str], Optional[str]]:
-    try:
-        with opener.open(request, timeout=NAV_TIMEOUT) as response:
-            return response.read().decode("utf-8", errors="replace"), None
-    except urllib.error.HTTPError as exc:
-        return None, f"HTTP {exc.code}"
-    except (urllib.error.URLError, OSError):
-        return None, "网络连接失败"
 
 
 def _load_jar(cookie_path: Path) -> tuple[Optional[http.cookiejar.MozillaCookieJar], Optional[str]]:
@@ -200,9 +159,11 @@ def _refresh_csrf(
     correspond_path, error = _correspond_path(timestamp)
     if correspond_path is None:
         return None, error
-    page, error = _request_text(opener, _request(f"{CORRESPOND_URL_PREFIX}{correspond_path}"))
+    page, failure = transport.fetch_text(
+        opener, transport.request(f"{CORRESPOND_URL_PREFIX}{correspond_path}")
+    )
     if page is None:
-        return None, error
+        return None, failure.describe() if failure else "未知错误"
     parser = _RefreshCsrfParser()
     parser.feed(page)
     if not parser.value:
@@ -210,19 +171,19 @@ def _refresh_csrf(
     return parser.value, None
 
 
-def _renewal_requirement(cookie_path: Path) -> RenewalRequirement:
+def _renewal_requirement(cookie_path: Path, *, proxy: Optional[str] = None) -> RenewalRequirement:
     """Ask Bilibili whether it currently requests a Web-session refresh."""
     jar, error = _load_jar(cookie_path)
     if jar is None:
         return RenewalRequirement(error=error)
-    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+    opener = transport.cookie_opener(jar, proxy)
     csrf = _cookie_value(jar, "bili_jct")
     if not csrf:
         return RenewalRequirement(error="Cookie 缺少 bili_jct")
     info_url = f"{COOKIE_INFO_API}?{urllib.parse.urlencode({'csrf': csrf})}"
-    payload, error = _request_json(opener, _request(info_url))
+    payload, failure = transport.fetch_json(opener, transport.request(info_url))
     if payload is None:
-        return RenewalRequirement(error=error)
+        return RenewalRequirement(error=failure.describe() if failure else "未知错误")
     data = payload.get("data")
     if payload.get("code") != 0 or not isinstance(data, dict):
         return RenewalRequirement(error=str(payload.get("message") or "B 站拒绝检查会话续期"))
@@ -240,19 +201,23 @@ def _renewal_requirement(cookie_path: Path) -> RenewalRequirement:
     )
 
 
-def check_requirement(cookie_path: Path) -> tuple[Optional[bool], Optional[str]]:
+def check_requirement(
+    cookie_path: Path, *, proxy: Optional[str] = None
+) -> tuple[Optional[bool], Optional[str]]:
     """Read Bilibili's current refresh requirement without changing a session."""
-    result = _renewal_requirement(cookie_path)
+    result = _renewal_requirement(cookie_path, proxy=proxy)
     return result.required, result.error
 
 
-def check_and_refresh(cookie_path: Path, refresh_token: str) -> RenewalResult:
+def check_and_refresh(
+    cookie_path: Path, refresh_token: str, *, proxy: Optional[str] = None
+) -> RenewalResult:
     """Check Bilibili's daily renewal flag and refresh when it requests one.
 
     The returned candidate is not written to disk and old refresh-token
     confirmation is intentionally deferred to :func:`confirm`.
     """
-    requirement = _renewal_requirement(cookie_path)
+    requirement = _renewal_requirement(cookie_path, proxy=proxy)
     if requirement.error:
         return RenewalResult(messages=[("warn", f"[登录] 无法检查会话续期：{requirement.error}")])
     if requirement.required is False:
@@ -274,9 +239,12 @@ def check_and_refresh(cookie_path: Path, refresh_token: str) -> RenewalResult:
             "refresh_token": refresh_token,
         }
     ).encode()
-    payload, error = _request_json(requirement.opener, _request(COOKIE_REFRESH_API, form))
+    payload, failure = transport.fetch_json(
+        requirement.opener, transport.request(COOKIE_REFRESH_API, form)
+    )
     if payload is None:
-        return RenewalResult(messages=[("warn", f"[登录] 无法刷新会话：{error}")])
+        detail = failure.describe() if failure else "未知错误"
+        return RenewalResult(messages=[("warn", f"[登录] 无法刷新会话：{detail}")])
     data = payload.get("data")
     new_token = data.get("refresh_token") if isinstance(data, dict) else None
     if payload.get("code") != 0 or not isinstance(new_token, str) or not new_token:
@@ -306,9 +274,11 @@ def _confirm(
     if not csrf:
         return "刷新后的会话缺少 bili_jct"
     form = urllib.parse.urlencode({"csrf": csrf, "refresh_token": old_refresh_token}).encode()
-    payload, error = _request_json(opener, _request(COOKIE_CONFIRM_REFRESH_API, form))
+    payload, failure = transport.fetch_json(
+        opener, transport.request(COOKIE_CONFIRM_REFRESH_API, form)
+    )
     if payload is None:
-        return error
+        return failure.describe() if failure else "未知错误"
     if payload.get("code") != 0:
         return str(payload.get("message") or "B 站拒绝确认会话续期")
     return None
@@ -326,10 +296,12 @@ def confirm(result: RenewalResult) -> Optional[str]:
     return _confirm(result.opener, result.jar, result.old_refresh_token)
 
 
-def confirm_pending(cookie_path: Path, old_refresh_token: str) -> Optional[str]:
+def confirm_pending(
+    cookie_path: Path, old_refresh_token: str, *, proxy: Optional[str] = None
+) -> Optional[str]:
     """Retry a previously persisted old-token confirmation."""
     jar, error = _load_jar(cookie_path)
     if jar is None:
         return error
-    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+    opener = transport.cookie_opener(jar, proxy)
     return _confirm(opener, jar, old_refresh_token)

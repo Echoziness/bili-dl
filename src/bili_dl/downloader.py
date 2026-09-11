@@ -78,12 +78,14 @@ def _common_args(cfg: DownloadConfig) -> list[str]:
 
     Explicit parameter threading — the whole reason this project exists
     (see AGENTS.md §2.1: the PowerShell scoping bug that silently dropped
-    these exact args).
+    these exact args). ``--proxy`` is always present because yt-dlp defines
+    an empty value as direct connection; omitting it would let the subprocess
+    re-read inherited proxy environment variables after the CLI resolved an
+    explicit ``proxy = ""``.
     """
     args: list[str] = ["--no-playlist", "--retries", "10", "--cookies", str(cfg.cookie_path)]
     args += ["--add-header", f"Referer:{cfg.referer}"]
-    if cfg.proxy:
-        args += ["--proxy", cfg.proxy]
+    args += ["--proxy", cfg.proxy]
     if cfg.insecure:
         args.append("--no-check-certificate")
     return args

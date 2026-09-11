@@ -122,7 +122,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--insecure",
         action="store_true",
         default=None,
-        help="skip TLS certificate verification (special environments only)",
+        help="skip yt-dlp TLS verification; authentication APIs stay verified",
     )
     p.add_argument(
         "--no-color",
@@ -133,7 +133,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--proxy",
         default=None,
         metavar="URL",
-        help="proxy URL for yt-dlp (env: HTTP_PROXY, HTTPS_PROXY)",
+        help="proxy URL for downloads and Bilibili APIs (env: HTTP_PROXY, HTTPS_PROXY)",
     )
     p.add_argument(
         "--cookie-dir",
@@ -199,6 +199,12 @@ def _build_login_parser() -> argparse.ArgumentParser:
         metavar="FILE",
         help=f"override config file path (default: {config_file_path()})",
     )
+    p.add_argument(
+        "--proxy",
+        default=None,
+        metavar="URL",
+        help="proxy URL for Bilibili APIs (env: HTTP_PROXY, HTTPS_PROXY)",
+    )
     p.add_argument("--no-color", action="store_true", help="disable colored output")
     return p
 
@@ -214,29 +220,31 @@ def _load_settings(config_path: Optional[Path]) -> settings.Settings:
         return settings.Settings()
 
 
+def _resolve_proxy(cli_proxy: Optional[str], config_proxy: Optional[str]) -> str:
+    """Resolve the single proxy value shared by downloads and Bilibili APIs."""
+    proxy = cli_proxy if cli_proxy is not None else config_proxy
+    if proxy is not None:
+        return proxy
+    return (
+        os.environ.get("HTTPS_PROXY")
+        or os.environ.get("https_proxy")
+        or os.environ.get("HTTP_PROXY")
+        or os.environ.get("http_proxy")
+        or ""
+    )
+
+
 def _merge_settings(args: argparse.Namespace, cfg: settings.Settings) -> Options:
     """Merge config + env vars with CLI args.
 
-    Precedence: CLI flags > env vars > config file > defaults.
+    Precedence: CLI flags > config file > env vars > defaults.
     (clig.dev §Configuration)
     """
     mode = args.mode or cfg.mode or "all"
 
-    # Proxy: CLI flag > config > env vars (clig.dev standard).
-    # Accept both upper and lower case — curl/git/requests all check both.
-    proxy = args.proxy if args.proxy is not None else cfg.proxy
-    if proxy is None:
-        proxy = (
-            os.environ.get("HTTPS_PROXY")
-            or os.environ.get("https_proxy")
-            or os.environ.get("HTTP_PROXY")
-            or os.environ.get("http_proxy")
-            or ""
-        )
-
     return Options(
         mode=mode if mode in VALID_MODES else "all",
-        proxy=proxy,
+        proxy=_resolve_proxy(args.proxy, cfg.proxy),
         insecure=args.insecure if args.insecure is not None else (cfg.insecure or False),
         cookie_dir=args.cookie_dir or cfg.cookie_dir,
         video_dir=args.output_dir or cfg.video_dir,
@@ -262,7 +270,7 @@ def _prepare_cookie(opts: Options) -> bool:
     :func:`cookiestore.ensure_cookie` (one call, no internal coordination
     leaking into the controller). On failure, prints a help block.
     """
-    result = cookiestore.ensure_cookie(opts.cookie_dir)
+    result = cookiestore.ensure_cookie(opts.cookie_dir, proxy=opts.proxy)
     _emit(result.messages)
     if result.ready:
         return True
@@ -293,13 +301,14 @@ def _login_command(argv: list[str]) -> int:
 
     cfg = _load_settings(args.config)
     cookie_dir = args.cookie_dir or cfg.cookie_dir or config_dir()
+    proxy = _resolve_proxy(args.proxy, cfg.proxy)
     try:
         ensure_dir(cookie_dir)
     except OSError as exc:
         ui.error(f"[错误] 无法创建 Cookie 目录: {exc}")
         return 1
 
-    start = authqr.start()
+    start = authqr.start(proxy=proxy)
     _emit(start.messages)
     if start.session is None:
         return 1
@@ -317,14 +326,16 @@ def _login_command(argv: list[str]) -> int:
     _emit(result.messages)
     if not result.success:
         return 1
-    stored = cookiestore.store_qr_session(result.cookie_lines, result.refresh_token, cookie_dir)
+    stored = cookiestore.store_qr_session(
+        result.cookie_lines, result.refresh_token, cookie_dir, proxy=proxy
+    )
     _emit(stored.messages)
     return 0 if stored.success else 1
 
 
 def _status_command(opts: Options) -> int:
     """Report meaningful session facts without downloading, refreshing, or prompting."""
-    result = cookiestore.validate(opts.cookie_dir)
+    result = cookiestore.validate(opts.cookie_dir, proxy=opts.proxy)
     state, state_error = cookiestore.renewal_state(opts.cookie_dir)
     if result.valid and result.uname is not None:
         ui.ok(f"[状态] 已登录: {result.uname}")
@@ -336,7 +347,7 @@ def _status_command(opts: Options) -> int:
 
     if result.valid:
         required, error = authrefresh.check_requirement(
-            cookiestore.bili_cookie_path(opts.cookie_dir)
+            cookiestore.bili_cookie_path(opts.cookie_dir), proxy=opts.proxy
         )
         if required is True:
             if state is not None:

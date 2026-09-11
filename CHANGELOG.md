@@ -46,12 +46,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `bili-dl login` now reads `config.toml` (or `--config FILE`) so a configured
   `cookie_dir` is shared consistently by login, status checks, and downloads.
 
+### Changed — Unified authentication transport
+
+- QR login, `nav` validation, renewal checks, refresh, and confirmation now
+  use one internal HTTP transport for browser headers, timeouts, Cookie jars,
+  JSON decoding, and display-safe error classification. Protocol modules no
+  longer maintain subtly different urllib wrappers.
+- Proxy resolution is now a single CLI/config/environment policy shared by
+  downloads and every Bilibili session API. `bili-dl login` accepts
+  `--proxy`; an explicit empty config value still disables environment proxy
+  inheritance. yt-dlp now receives its documented empty proxy argument for
+  direct connections instead of silently re-reading inherited proxy variables.
+- Proxy parameters are keyword-only at the authentication/store boundary so
+  future call sites cannot silently confuse transport policy with paths or
+  credentials. `--insecure` remains deliberately limited to yt-dlp: login and
+  session APIs never disable TLS verification.
+
 ### Tests
 
 - Added protocol and transaction coverage for QR refresh-token receipt,
   refresh-state atomic storage, daily no-refresh checks, staged Cookie
-  replacement, session-binding rejection, and old-token confirmation
-  (209 tests; total coverage 85%).
+  replacement, session-binding rejection, old-token confirmation,
+  transport error safety, and end-to-end proxy propagation (218 tests; total
+  coverage 87%, shared transport 96%).
 
 ## [0.3.0] - 2026-08-14
 

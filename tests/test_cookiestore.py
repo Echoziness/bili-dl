@@ -9,8 +9,6 @@ Asserts that:
 
 from __future__ import annotations
 
-import json
-import urllib.error
 from pathlib import Path
 
 import pytest
@@ -69,62 +67,41 @@ def test_ensure_cookie_no_source(tmp_path: Path) -> None:
     assert result.ready is False
 
 
-# ─── _nav_probe: mock urllib to test error classification ───────────────────
-
-
-class _FakeResp:
-    """Minimal context-manager response object for urlopen mock."""
-
-    def __init__(self, body: bytes) -> None:
-        self._body = body
-
-    def read(self) -> bytes:
-        return self._body
-
-    def __enter__(self) -> _FakeResp:
-        return self
-
-    def __exit__(self, *args: object) -> None:
-        pass
+# ─── _nav_probe: shared transport integration ──────────────────────────────
 
 
 def test_nav_probe_success(monkeypatch: pytest.MonkeyPatch) -> None:
-    body = json.dumps({"code": 0, "data": {"isLogin": True, "uname": "alice"}}).encode()
-    monkeypatch.setattr(store.urllib.request, "urlopen", lambda req, timeout: _FakeResp(body))
+    monkeypatch.setattr(
+        store.transport,
+        "fetch_json",
+        lambda opener, request: (
+            {"code": 0, "data": {"isLogin": True, "uname": "alice"}},
+            None,
+        ),
+    )
     data, error = store._nav_probe("sess")
     assert data is not None
     assert error is None
     assert data["data"]["uname"] == "alice"
 
 
-def test_nav_probe_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fake_urlopen(req: object, timeout: float) -> object:
-        raise urllib.error.HTTPError("url", 412, "Precondition Failed", {}, None)
-
-    monkeypatch.setattr(store.urllib.request, "urlopen", fake_urlopen)
-    data, error = store._nav_probe("sess")
+def test_nav_probe_passes_proxy_to_shared_opener(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: list[str | None] = []
+    real_cookie_opener = store.transport.cookie_opener
+    monkeypatch.setattr(
+        store.transport,
+        "cookie_opener",
+        lambda jar=None, proxy=None: captured.append(proxy) or real_cookie_opener(jar, proxy),
+    )
+    monkeypatch.setattr(
+        store.transport,
+        "fetch_json",
+        lambda opener, request: (None, store.transport.HttpFailure("http", 412)),
+    )
+    data, error = store._nav_probe("sess", proxy="http://proxy:7890")
     assert data is None
-    assert error == "http:412"
-
-
-def test_nav_probe_url_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fake_urlopen(req: object, timeout: float) -> object:
-        raise urllib.error.URLError("timeout")
-
-    monkeypatch.setattr(store.urllib.request, "urlopen", fake_urlopen)
-    data, error = store._nav_probe("sess")
-    assert data is None
-    assert error == "network"
-
-
-def test_nav_probe_badjson(monkeypatch: pytest.MonkeyPatch) -> None:
-    """B站 returns HTML instead of JSON → 'badjson', not 'network' (§2.20)."""
-    body = b"<html><body>Server Error</body></html>"
-
-    monkeypatch.setattr(store.urllib.request, "urlopen", lambda req, timeout: _FakeResp(body))
-    data, error = store._nav_probe("sess")
-    assert data is None
-    assert error == "badjson"
+    assert error == store.transport.HttpFailure("http", 412)
+    assert captured == ["http://proxy:7890"]
 
 
 # ─── validate: mock _nav_probe to test message precision ────────────────────
@@ -135,7 +112,7 @@ def test_validate_logged_in(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(
         store,
         "_nav_probe",
-        lambda s: ({"code": 0, "data": {"isLogin": True, "uname": "bob"}}, None),
+        lambda s, proxy=None: ({"code": 0, "data": {"isLogin": True, "uname": "bob"}}, None),
     )
     result = store.validate(d)
     assert result.valid is True
@@ -144,7 +121,9 @@ def test_validate_logged_in(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_validate_not_logged_in(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     d = _make_cookie_dir(tmp_path)
-    monkeypatch.setattr(store, "_nav_probe", lambda s: ({"code": -101, "data": {}}, None))
+    monkeypatch.setattr(
+        store, "_nav_probe", lambda s, proxy=None: ({"code": -101, "data": {}}, None)
+    )
     result = store.validate(d)
     assert result.valid is False
 
@@ -153,7 +132,11 @@ def test_validate_degrades_on_network_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     d = _make_cookie_dir(tmp_path)
-    monkeypatch.setattr(store, "_nav_probe", lambda s: (None, "network"))
+    monkeypatch.setattr(
+        store,
+        "_nav_probe",
+        lambda s, proxy=None: (None, store.transport.HttpFailure("network")),
+    )
     result = store.validate(d)
     assert result.valid is True
     assert any("网络" in t for _, t in result.messages)
@@ -163,7 +146,11 @@ def test_validate_degrades_on_http_error_with_status(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     d = _make_cookie_dir(tmp_path)
-    monkeypatch.setattr(store, "_nav_probe", lambda s: (None, "http:412"))
+    monkeypatch.setattr(
+        store,
+        "_nav_probe",
+        lambda s, proxy=None: (None, store.transport.HttpFailure("http", 412)),
+    )
     result = store.validate(d)
     assert result.valid is True
     assert any("HTTP 412" in t for _, t in result.messages)
@@ -172,7 +159,11 @@ def test_validate_degrades_on_http_error_with_status(
 def test_validate_degrades_on_badjson(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """B站 returns non-JSON → report 'non-JSON', not '网络/SSL' (§2.20)."""
     d = _make_cookie_dir(tmp_path)
-    monkeypatch.setattr(store, "_nav_probe", lambda s: (None, "badjson"))
+    monkeypatch.setattr(
+        store,
+        "_nav_probe",
+        lambda s, proxy=None: (None, store.transport.HttpFailure("bad_json")),
+    )
     result = store.validate(d)
     assert result.valid is True
     assert any("非 JSON" in t for _, t in result.messages)
@@ -210,7 +201,9 @@ def test_validate_logged_in_no_uname(tmp_path: Path, monkeypatch: pytest.MonkeyP
     """isLogin True but uname missing → falls back to '?' rather than KeyError."""
     d = _make_cookie_dir(tmp_path)
     monkeypatch.setattr(
-        store, "_nav_probe", lambda s: ({"code": 0, "data": {"isLogin": True}}, None)
+        store,
+        "_nav_probe",
+        lambda s, proxy=None: ({"code": 0, "data": {"isLogin": True}}, None),
     )
     result = store.validate(d)
     assert result.valid is True
@@ -224,7 +217,9 @@ def test_store_qr_cookie_validates_before_replacing(
     old = store.bili_cookie_path(tmp_path)
     old.parent.mkdir(parents=True, exist_ok=True)
     old.write_text("old-cookie\n", encoding="utf-8")
-    monkeypatch.setattr(store, "_nav_probe", lambda s: ({"code": -101, "data": {}}, None))
+    monkeypatch.setattr(
+        store, "_nav_probe", lambda s, proxy=None: ({"code": -101, "data": {}}, None)
+    )
 
     result = store.store_qr_cookie([".bilibili.com\tTRUE\t/\tTRUE\t0\tSESSDATA\tnew"], tmp_path)
 
@@ -238,7 +233,10 @@ def test_store_qr_cookie_replaces_after_online_validation(
     monkeypatch.setattr(
         store,
         "_nav_probe",
-        lambda s: ({"code": 0, "data": {"isLogin": True, "uname": "qr-user"}}, None),
+        lambda s, proxy=None: (
+            {"code": 0, "data": {"isLogin": True, "uname": "qr-user"}},
+            None,
+        ),
     )
 
     result = store.store_qr_cookie(
@@ -259,7 +257,7 @@ def test_store_qr_session_saves_refresh_token_after_cookie_validation(
     monkeypatch.setattr(
         store,
         "store_qr_cookie",
-        lambda lines, cookie_dir: store.QrStoreResult(True, [("ok", "stored")]),
+        lambda lines, cookie_dir, proxy: store.QrStoreResult(True, [("ok", "stored")]),
     )
     saved: list[authstate.AuthState] = []
     monkeypatch.setattr(authstate, "save", lambda state, cookie_dir: saved.append(state) or None)
@@ -286,7 +284,7 @@ def test_store_qr_session_without_token_removes_stale_state(
     monkeypatch.setattr(
         store,
         "store_qr_cookie",
-        lambda lines, cookie_dir: store.QrStoreResult(True, [("ok", "stored")]),
+        lambda lines, cookie_dir, proxy: store.QrStoreResult(True, [("ok", "stored")]),
     )
 
     result = store.store_qr_session(
@@ -307,7 +305,7 @@ def test_store_qr_session_without_csrf_does_not_enable_renewal(
     monkeypatch.setattr(
         store,
         "store_qr_cookie",
-        lambda lines, cookie_dir: store.QrStoreResult(True, [("ok", "stored")]),
+        lambda lines, cookie_dir, proxy: store.QrStoreResult(True, [("ok", "stored")]),
     )
 
     result = store.store_qr_session(
@@ -345,7 +343,7 @@ def test_store_qr_session_state_write_failure_removes_stale_state(
     monkeypatch.setattr(
         store,
         "store_qr_cookie",
-        lambda lines, cookie_dir: store.QrStoreResult(True, [("ok", "stored")]),
+        lambda lines, cookie_dir, proxy: store.QrStoreResult(True, [("ok", "stored")]),
     )
     monkeypatch.setattr(authstate, "save", lambda state, cookie_dir: "无法保存刷新凭证状态")
 
@@ -408,7 +406,7 @@ def test_renew_if_due_never_sends_a_mismatched_refresh_token(
         authstate.save(authstate.AuthState("must-not-send", "wrong-fingerprint"), tmp_path) is None
     )
 
-    def fail_if_called(path: Path, token: str) -> authrefresh.RenewalResult:
+    def fail_if_called(path: Path, token: str, proxy: str | None) -> authrefresh.RenewalResult:
         raise AssertionError("mismatched refresh token was sent")
 
     monkeypatch.setattr(authrefresh, "check_and_refresh", fail_if_called)
@@ -429,16 +427,18 @@ def test_renew_if_due_records_successful_daily_check(
         "renewal_state",
         lambda cookie_dir: (authstate.AuthState("token", "fingerprint"), None),
     )
+    proxies: list[str | None] = []
     monkeypatch.setattr(
         authrefresh,
         "check_and_refresh",
-        lambda path, token: authrefresh.RenewalResult(checked=True),
+        lambda path, token, proxy: proxies.append(proxy) or authrefresh.RenewalResult(checked=True),
     )
     saved: list[authstate.AuthState] = []
     monkeypatch.setattr(authstate, "save", lambda state, cookie_dir: saved.append(state) or None)
 
-    assert store._renew_if_due(tmp_path) == []
+    assert store._renew_if_due(tmp_path, proxy="http://renew:7890") == []
     assert saved == [authstate.AuthState("token", "fingerprint", "2026-09-11")]
+    assert proxies == ["http://renew:7890"]
 
 
 def test_renew_if_due_persists_new_session_before_confirming_old_token(
@@ -459,11 +459,11 @@ def test_renew_if_due_persists_new_session_before_confirming_old_token(
         refresh_token="new",
         old_refresh_token="old",
     )
-    monkeypatch.setattr(authrefresh, "check_and_refresh", lambda path, token: renewal)
+    monkeypatch.setattr(authrefresh, "check_and_refresh", lambda path, token, proxy: renewal)
     monkeypatch.setattr(
         store,
         "_store_verified_cookie",
-        lambda lines, cookie_dir, message: store.QrStoreResult(True, [("ok", "new-cookie")]),
+        lambda lines, cookie_dir, message, proxy: store.QrStoreResult(True, [("ok", "new-cookie")]),
     )
     saved: list[authstate.AuthState] = []
     monkeypatch.setattr(authstate, "save", lambda state, cookie_dir: saved.append(state) or None)
@@ -508,11 +508,11 @@ def test_renew_if_due_keeps_pending_confirmation_after_network_failure(
         refresh_token="new",
         old_refresh_token="old",
     )
-    monkeypatch.setattr(authrefresh, "check_and_refresh", lambda path, token: renewal)
+    monkeypatch.setattr(authrefresh, "check_and_refresh", lambda path, token, proxy: renewal)
     monkeypatch.setattr(
         store,
         "_store_verified_cookie",
-        lambda lines, cookie_dir, message: store.QrStoreResult(True),
+        lambda lines, cookie_dir, message, proxy: store.QrStoreResult(True),
     )
     saved: list[authstate.AuthState] = []
     monkeypatch.setattr(authstate, "save", lambda state, cookie_dir: saved.append(state) or None)
@@ -537,14 +537,14 @@ def test_renew_if_due_retries_persisted_confirmation_before_daily_check(
     monkeypatch.setattr(
         authrefresh,
         "confirm_pending",
-        lambda path, token: confirmed.append(token) or None,
+        lambda path, token, proxy: confirmed.append(token) or None,
     )
     saved: list[authstate.AuthState] = []
     monkeypatch.setattr(authstate, "save", lambda value, cookie_dir: saved.append(value) or None)
     monkeypatch.setattr(
         authrefresh,
         "check_and_refresh",
-        lambda path, token: pytest.fail("daily check must stay throttled"),
+        lambda path, token, proxy: pytest.fail("daily check must stay throttled"),
     )
 
     messages = store._renew_if_due(tmp_path)
@@ -563,7 +563,12 @@ def test_ensure_cookie_already_valid_skips_import(
     """When the existing cookie validates online, import is never called."""
     d = _make_cookie_dir(tmp_path)
     monkeypatch.setattr(
-        store, "_nav_probe", lambda s: ({"code": 0, "data": {"isLogin": True, "uname": "u"}}, None)
+        store,
+        "_nav_probe",
+        lambda s, proxy=None: (
+            {"code": 0, "data": {"isLogin": True, "uname": "u"}},
+            None,
+        ),
     )
     from bili_dl.cookiesource import ImportResult
 

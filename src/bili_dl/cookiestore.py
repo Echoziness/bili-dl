@@ -1,26 +1,25 @@
-"""Cookie validation and readiness orchestration.
+"""Bilibili Cookie persistence, validation, and renewal orchestration.
 
-Single responsibility: determine whether a usable Bilibili cookie file exists,
-and if not, coordinate with :mod:`cookiesource` to create one.
+This is the storage boundary for the active Web session. It validates imported
+or QR-issued Cookies, atomically replaces verified sessions, binds renewal
+state, and serializes renewal transactions. Protocol details stay in
+:mod:`authrefresh`; HTTP mechanics stay in :mod:`transport`.
 
 This module is pure logic — it returns :class:`ValidationResult` /
 :class:`EnsureResult` objects and never calls ``ui.*`` directly. The controller
 (``cli.py``) is responsible for turning result messages into terminal output.
 
-Online probe: the ``nav`` API requires a browser User-Agent (Bilibili returns
-HTTP 412 to urllib's default ``Python-urllib/x.y`` UA). On network/SSL failure
-we degrade gracefully to local-only validation.
+Online probe: the ``nav`` API requires the browser headers supplied by the
+shared transport (Bilibili returns HTTP 412 to urllib's default UA). On a
+transport failure we degrade gracefully to local-only validation.
 """
 
 from __future__ import annotations
 
 import contextlib
 import hashlib
-import json
 import os
 import tempfile
-import urllib.error
-import urllib.request
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -29,14 +28,12 @@ from typing import Any, Optional
 from filelock import FileLock
 from filelock import Timeout as FileLockTimeout
 
-from . import authrefresh, authstate
+from . import authrefresh, authstate, transport
 from .config import (
     AUTH_LOCK_FILENAME,
     AUTH_LOCK_TIMEOUT,
     BILI_COOKIE_FILENAME,
     NAV_API,
-    NAV_TIMEOUT,
-    USER_AGENT,
 )
 from .cookiesource import find_source, import_cookie, read_lines
 from .paths import config_dir
@@ -126,38 +123,16 @@ def renewal_state(
     return state, None
 
 
-def _nav_probe(sessdata: str) -> tuple[Optional[dict[str, Any]], Optional[str]]:
-    """Probe the nav API; return ``(data, error)``.
-
-    On success *data* holds parsed JSON and *error* is ``None``.
-    On failure *data* is ``None`` and *error* is one of:
-    - ``"network"`` — connection failure (URLError/OSError)
-    - ``"http:{status}"`` — HTTP error, e.g. 412 = 风控
-    - ``"badjson"`` — server returned non-JSON body (风控/接口变更)
-
-    HTTPError is caught separately from URLError so the caller can distinguish
-    "B 站风控/接口异常" (HTTP 4xx/5xx) from "本机网络不通" (URLError) —
-    previously both were swallowed by ``except Exception`` and reported as
-    "网络/SSL 错误", masking the real cause (AGENTS.md §2.6).
-    JSONDecodeError is also separated: B站 may return an HTML error page
-    instead of JSON, which is not a network issue (AGENTS.md §2.20).
-    """
-    try:
-        req = urllib.request.Request(
-            NAV_API, headers={"Cookie": f"SESSDATA={sessdata}", "User-Agent": USER_AGENT}
-        )
-        with urllib.request.urlopen(req, timeout=NAV_TIMEOUT) as resp:
-            data: dict[str, Any] = json.loads(resp.read().decode("utf-8", errors="replace"))
-            return data, None
-    except urllib.error.HTTPError as e:
-        return None, f"http:{e.code}"
-    except json.JSONDecodeError:
-        return None, "badjson"
-    except (urllib.error.URLError, OSError):
-        return None, "network"
+def _nav_probe(
+    sessdata: str, *, proxy: Optional[str] = None
+) -> tuple[Optional[dict[str, Any]], Optional[transport.HttpFailure]]:
+    """Probe the nav API through the shared authenticated HTTP boundary."""
+    opener = transport.cookie_opener(proxy=proxy)
+    req = transport.request(NAV_API, headers={"Cookie": f"SESSDATA={sessdata}"})
+    return transport.fetch_json(opener, req)
 
 
-def validate(cookie_dir: Optional[Path] = None) -> ValidationResult:
+def validate(cookie_dir: Optional[Path] = None, *, proxy: Optional[str] = None) -> ValidationResult:
     """Check local format + online login status of the Bilibili cookie file.
 
     Returns a :class:`ValidationResult`. On network error, degrades to
@@ -181,15 +156,17 @@ def validate(cookie_dir: Optional[Path] = None) -> ValidationResult:
             messages=[("warn", "[提示] 未找到 SESSDATA（可能未登录，或 Cookie 已过期）")],
         )
 
-    data, error = _nav_probe(sessdata)
+    data, failure = _nav_probe(sessdata, proxy=proxy)
     if data is None:
         # Error path — degrade to local-only, but report the *real* cause
-        if error == "network":
+        if failure is not None and failure.kind == "network":
             cause = "网络/SSL 错误"
-        elif error == "badjson":
+        elif failure is not None and failure.kind == "bad_json":
             cause = "B 站返回非 JSON 内容（可能被风控或接口变更）"
-        elif error is not None and error.startswith("http:"):
-            cause = f"B 站返回 HTTP {error[5:]}（可能被风控或接口变更）"
+        elif failure is not None and failure.kind == "http" and failure.status is not None:
+            cause = f"B 站返回 HTTP {failure.status}（可能被风控或接口变更）"
+        elif failure is not None:
+            cause = failure.describe()
         else:
             cause = "未知错误"
         return ValidationResult(
@@ -214,7 +191,11 @@ def validate(cookie_dir: Optional[Path] = None) -> ValidationResult:
 
 
 def _store_verified_cookie(
-    cookie_lines: list[str], cookie_dir: Optional[Path], success_message: str
+    cookie_lines: list[str],
+    cookie_dir: Optional[Path],
+    success_message: str,
+    *,
+    proxy: Optional[str] = None,
 ) -> QrStoreResult:
     """Validate a replacement session online, then atomically store it.
 
@@ -227,9 +208,9 @@ def _store_verified_cookie(
     if not sessdata:
         return QrStoreResult(False, [("error", "[登录] 新会话缺少 SESSDATA，未改动现有 Cookie")])
 
-    data, error = _nav_probe(sessdata)
+    data, failure = _nav_probe(sessdata, proxy=proxy)
     if data is None:
-        detail = "网络错误" if error == "network" else (error or "未知错误")
+        detail = failure.describe() if failure else "未知错误"
         return QrStoreResult(
             False, [("error", f"[登录] 无法验证新会话（{detail}），未改动现有 Cookie")]
         )
@@ -259,13 +240,21 @@ def _store_verified_cookie(
     return QrStoreResult(True, [("ok", success_message.format(uname=uname))])
 
 
-def store_qr_cookie(cookie_lines: list[str], cookie_dir: Optional[Path] = None) -> QrStoreResult:
+def store_qr_cookie(
+    cookie_lines: list[str], cookie_dir: Optional[Path] = None, *, proxy: Optional[str] = None
+) -> QrStoreResult:
     """Validate QR-login cookies online, then atomically replace the output file."""
-    return _store_verified_cookie(cookie_lines, cookie_dir, "[登录] 成功 | 已登录: {uname}")
+    return _store_verified_cookie(
+        cookie_lines, cookie_dir, "[登录] 成功 | 已登录: {uname}", proxy=proxy
+    )
 
 
 def store_qr_session(
-    cookie_lines: list[str], refresh_token: Optional[str], cookie_dir: Optional[Path] = None
+    cookie_lines: list[str],
+    refresh_token: Optional[str],
+    cookie_dir: Optional[Path] = None,
+    *,
+    proxy: Optional[str] = None,
 ) -> QrStoreResult:
     """Store a verified QR session and its renewal credential together.
 
@@ -275,15 +264,18 @@ def store_qr_session(
     """
     try:
         with _auth_lock(cookie_dir):
-            return _store_qr_session_locked(cookie_lines, refresh_token, cookie_dir)
+            return _store_qr_session_locked(cookie_lines, refresh_token, cookie_dir, proxy)
     except (FileLockTimeout, OSError):
         return QrStoreResult(False, [("error", "[登录] 另一项登录或续期操作正在进行，请稍后重试")])
 
 
 def _store_qr_session_locked(
-    cookie_lines: list[str], refresh_token: Optional[str], cookie_dir: Optional[Path]
+    cookie_lines: list[str],
+    refresh_token: Optional[str],
+    cookie_dir: Optional[Path],
+    proxy: Optional[str],
 ) -> QrStoreResult:
-    result = store_qr_cookie(cookie_lines, cookie_dir)
+    result = store_qr_cookie(cookie_lines, cookie_dir, proxy=proxy)
     if not result.success:
         return result
     fingerprint = _session_fingerprint(cookie_lines)
@@ -321,16 +313,18 @@ def _utc_today() -> str:
     return datetime.now(UTC).date().isoformat()
 
 
-def _renew_if_due(cookie_dir: Optional[Path]) -> list[tuple[str, str]]:
+def _renew_if_due(
+    cookie_dir: Optional[Path], *, proxy: Optional[str] = None
+) -> list[tuple[str, str]]:
     """Serialize and run the failure-tolerant daily renewal transaction."""
     try:
         with _auth_lock(cookie_dir):
-            return _renew_if_due_locked(cookie_dir)
+            return _renew_if_due_locked(cookie_dir, proxy)
     except (FileLockTimeout, OSError):
         return [("warn", "[登录] 另一项登录或续期操作正在进行，本次跳过自动续期")]
 
 
-def _renew_if_due_locked(cookie_dir: Optional[Path]) -> list[tuple[str, str]]:
+def _renew_if_due_locked(cookie_dir: Optional[Path], proxy: Optional[str]) -> list[tuple[str, str]]:
     """Refresh a verified session only when Bilibili requests it for the day."""
     state, error = renewal_state(cookie_dir)
     if error:
@@ -341,7 +335,7 @@ def _renew_if_due_locked(cookie_dir: Optional[Path]) -> list[tuple[str, str]]:
     cookie_path = bili_cookie_path(cookie_dir)
     messages: list[tuple[str, str]] = []
     if state.pending_confirm_token is not None:
-        error = authrefresh.confirm_pending(cookie_path, state.pending_confirm_token)
+        error = authrefresh.confirm_pending(cookie_path, state.pending_confirm_token, proxy=proxy)
         if error:
             return [("warn", f"[登录] 无法完成上次会话续期确认：{error}")]
         state = authstate.AuthState(
@@ -355,7 +349,7 @@ def _renew_if_due_locked(cookie_dir: Optional[Path]) -> list[tuple[str, str]]:
     if state.last_refresh_check_utc == _utc_today():
         return messages
 
-    renewal = authrefresh.check_and_refresh(cookie_path, state.refresh_token)
+    renewal = authrefresh.check_and_refresh(cookie_path, state.refresh_token, proxy=proxy)
     messages.extend(renewal.messages)
     if not renewal.checked:
         return messages
@@ -369,7 +363,10 @@ def _renew_if_due_locked(cookie_dir: Optional[Path]) -> list[tuple[str, str]]:
         return messages
 
     stored = _store_verified_cookie(
-        renewal.cookie_lines, cookie_dir, "[登录] 会话已自动刷新 | 已登录: {uname}"
+        renewal.cookie_lines,
+        cookie_dir,
+        "[登录] 会话已自动刷新 | 已登录: {uname}",
+        proxy=proxy,
     )
     messages.extend(stored.messages)
     if not stored.success or renewal.refresh_token is None:
@@ -405,7 +402,9 @@ def _renew_if_due_locked(cookie_dir: Optional[Path]) -> list[tuple[str, str]]:
     return messages
 
 
-def ensure_cookie(cookie_dir: Optional[Path] = None) -> EnsureResult:
+def ensure_cookie(
+    cookie_dir: Optional[Path] = None, *, proxy: Optional[str] = None
+) -> EnsureResult:
     """Ensure a valid Bilibili cookie is available; import from source if needed.
 
     Orchestration: validate → if invalid, import → re-validate.
@@ -414,9 +413,12 @@ def ensure_cookie(cookie_dir: Optional[Path] = None) -> EnsureResult:
     """
     msgs: list[tuple[str, str]] = []
 
-    result = validate(cookie_dir)
+    result = validate(cookie_dir, proxy=proxy)
     if result.valid:
-        return EnsureResult(ready=True, messages=result.messages + _renew_if_due(cookie_dir))
+        return EnsureResult(
+            ready=True,
+            messages=result.messages + _renew_if_due(cookie_dir, proxy=proxy),
+        )
 
     msgs.extend(result.messages)
 
@@ -429,6 +431,6 @@ def ensure_cookie(cookie_dir: Optional[Path] = None) -> EnsureResult:
     if not imp.success:
         return EnsureResult(ready=False, messages=msgs)
 
-    result2 = validate(cookie_dir)
+    result2 = validate(cookie_dir, proxy=proxy)
     msgs.extend(result2.messages)
     return EnsureResult(ready=result2.valid, messages=msgs)

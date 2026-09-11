@@ -69,18 +69,28 @@ def test_check_and_refresh_records_a_successful_no_refresh_check(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     jar = _jar()
+    proxies: list[str | None] = []
     monkeypatch.setattr(authrefresh, "_load_jar", lambda path: (jar, None))
+    real_cookie_opener = authrefresh.transport.cookie_opener
     monkeypatch.setattr(
-        authrefresh,
-        "_request_json",
+        authrefresh.transport,
+        "cookie_opener",
+        lambda current_jar, proxy: proxies.append(proxy) or real_cookie_opener(current_jar, proxy),
+    )
+    monkeypatch.setattr(
+        authrefresh.transport,
+        "fetch_json",
         lambda opener, request: ({"code": 0, "data": {"refresh": False}}, None),
     )
 
-    result = authrefresh.check_and_refresh(Path("unused"), "refresh-token")
+    result = authrefresh.check_and_refresh(
+        Path("unused"), "refresh-token", proxy="http://refresh:7890"
+    )
 
     assert result.checked is True
     assert result.refreshed is False
     assert result.messages == []
+    assert proxies == ["http://refresh:7890"]
 
 
 def test_check_requirement_is_read_only_and_reports_bilibili_flag(
@@ -89,8 +99,8 @@ def test_check_requirement_is_read_only_and_reports_bilibili_flag(
     jar = _jar()
     monkeypatch.setattr(authrefresh, "_load_jar", lambda path: (jar, None))
     monkeypatch.setattr(
-        authrefresh,
-        "_request_json",
+        authrefresh.transport,
+        "fetch_json",
         lambda opener, request: ({"code": 0, "data": {"refresh": False}}, None),
     )
 
@@ -108,7 +118,7 @@ def test_check_and_refresh_returns_new_candidate_before_confirmation(
         ]
     )
     monkeypatch.setattr(authrefresh, "_load_jar", lambda path: (jar, None))
-    monkeypatch.setattr(authrefresh, "_request_json", lambda opener, request: next(replies))
+    monkeypatch.setattr(authrefresh.transport, "fetch_json", lambda opener, request: next(replies))
     monkeypatch.setattr(authrefresh, "_refresh_csrf", lambda opener, timestamp: ("csrf-2", None))
 
     result = authrefresh.check_and_refresh(Path("unused"), "old-token")
@@ -126,7 +136,9 @@ def test_confirm_uses_the_new_cookie_jar(monkeypatch: pytest.MonkeyPatch) -> Non
     result = authrefresh.RenewalResult(
         checked=True, refreshed=True, old_refresh_token="old-token", opener=opener, jar=jar
     )
-    monkeypatch.setattr(authrefresh, "_request_json", lambda opener, request: ({"code": 0}, None))
+    monkeypatch.setattr(
+        authrefresh.transport, "fetch_json", lambda opener, request: ({"code": 0}, None)
+    )
 
     assert authrefresh.confirm(result) is None
 

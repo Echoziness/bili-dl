@@ -81,6 +81,11 @@ def test_login_parser_config() -> None:
     assert args.config == Path("/tmp/config.toml")
 
 
+def test_login_parser_proxy() -> None:
+    args = cli._build_login_parser().parse_args(["--proxy", "http://127.0.0.1:7890"])
+    assert args.proxy == "http://127.0.0.1:7890"
+
+
 def test_status_flag() -> None:
     assert _parse("--status").status is True
 
@@ -120,7 +125,7 @@ def test_login_does_not_require_ytdlp(monkeypatch: pytest.MonkeyPatch, tmp_path:
         opener=urllib.request.build_opener(),
     )
     monkeypatch.setattr(authqr, "qrcode_available", lambda: True)
-    monkeypatch.setattr(authqr, "start", lambda: authqr.QrStartResult(session=session))
+    monkeypatch.setattr(authqr, "start", lambda proxy: authqr.QrStartResult(session=session))
     monkeypatch.setattr(authqr, "render_terminal_qr", lambda url: "QR")
     monkeypatch.setattr(
         authqr,
@@ -130,7 +135,9 @@ def test_login_does_not_require_ytdlp(monkeypatch: pytest.MonkeyPatch, tmp_path:
         ),
     )
     monkeypatch.setattr(
-        cookiestore, "store_qr_cookie", lambda lines, d: cookiestore.QrStoreResult(True)
+        cookiestore,
+        "store_qr_cookie",
+        lambda lines, d, proxy: cookiestore.QrStoreResult(True),
     )
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr(downloader, "find_ytdlp", lambda: None)
@@ -143,7 +150,10 @@ def test_login_uses_cookie_dir_from_config(monkeypatch: pytest.MonkeyPatch, tmp_
 
     configured_dir = tmp_path / "configured-cookies"
     config_path = tmp_path / "config.toml"
-    config_path.write_text(f'cookie_dir = "{configured_dir.as_posix()}"\n', encoding="utf-8")
+    config_path.write_text(
+        f'cookie_dir = "{configured_dir.as_posix()}"\nproxy = "http://config:7890"\n',
+        encoding="utf-8",
+    )
     session = authqr.QrSession(
         url="https://passport.bilibili.com/qr",
         key="key",
@@ -151,7 +161,12 @@ def test_login_uses_cookie_dir_from_config(monkeypatch: pytest.MonkeyPatch, tmp_
         opener=urllib.request.build_opener(),
     )
     monkeypatch.setattr(authqr, "qrcode_available", lambda: True)
-    monkeypatch.setattr(authqr, "start", lambda: authqr.QrStartResult(session=session))
+    started_with: list[str] = []
+    monkeypatch.setattr(
+        authqr,
+        "start",
+        lambda proxy: started_with.append(proxy) or authqr.QrStartResult(session=session),
+    )
     monkeypatch.setattr(authqr, "render_terminal_qr", lambda url: "QR")
     monkeypatch.setattr(
         authqr,
@@ -162,18 +177,19 @@ def test_login_uses_cookie_dir_from_config(monkeypatch: pytest.MonkeyPatch, tmp_
             refresh_token="token",
         ),
     )
-    stored_in: list[Path] = []
+    stored_in: list[tuple[Path, str]] = []
     monkeypatch.setattr(
         cookiestore,
         "store_qr_session",
-        lambda lines, token, directory: (
-            stored_in.append(directory) or cookiestore.QrStoreResult(True)
+        lambda lines, token, directory, proxy: (
+            stored_in.append((directory, proxy)) or cookiestore.QrStoreResult(True)
         ),
     )
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
 
     assert cli.main(["login", "--config", str(config_path)]) == 0
-    assert stored_in == [configured_dir]
+    assert started_with == ["http://config:7890"]
+    assert stored_in == [(configured_dir, "http://config:7890")]
 
 
 def test_status_does_not_require_downloader_or_trigger_renewal(
@@ -182,27 +198,41 @@ def test_status_does_not_require_downloader_or_trigger_renewal(
     """Status is observational: no downloader check or renewal side effect."""
     from bili_dl import authrefresh, authstate, cookiestore
 
+    transports: list[tuple[str, str]] = []
     monkeypatch.setattr(
         cookiestore,
         "validate",
-        lambda cookie_dir: cookiestore.ValidationResult(True, uname="alice"),
+        lambda cookie_dir, proxy: (
+            transports.append(("validate", proxy))
+            or cookiestore.ValidationResult(True, uname="alice")
+        ),
     )
     monkeypatch.setattr(
         cookiestore,
         "renewal_state",
         lambda cookie_dir: (authstate.AuthState("token", "fingerprint", "2026-09-11"), None),
     )
-    monkeypatch.setattr(authrefresh, "check_requirement", lambda cookie_path: (False, None))
+    monkeypatch.setattr(
+        authrefresh,
+        "check_requirement",
+        lambda cookie_path, proxy: transports.append(("refresh", proxy)) or (False, None),
+    )
     monkeypatch.setattr(downloader, "find_ytdlp", lambda: None)
 
-    assert cli.main(["--status"]) == 0
+    assert cli.main(["--status", "--proxy", "http://status:7890"]) == 0
+    assert transports == [
+        ("validate", "http://status:7890"),
+        ("refresh", "http://status:7890"),
+    ]
 
 
 def test_status_invalid_cookie_returns_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     from bili_dl import cookiestore
 
     monkeypatch.setattr(
-        cookiestore, "validate", lambda cookie_dir: cookiestore.ValidationResult(False)
+        cookiestore,
+        "validate",
+        lambda cookie_dir, proxy: cookiestore.ValidationResult(False),
     )
     monkeypatch.setattr(cookiestore, "renewal_state", lambda cookie_dir: (None, None))
 
@@ -217,14 +247,14 @@ def test_status_does_not_promise_renewal_without_matching_state(
     monkeypatch.setattr(
         cookiestore,
         "validate",
-        lambda cookie_dir: cookiestore.ValidationResult(True, uname="alice"),
+        lambda cookie_dir, proxy: cookiestore.ValidationResult(True, uname="alice"),
     )
     monkeypatch.setattr(
         cookiestore,
         "renewal_state",
         lambda cookie_dir: (None, "刷新凭证不属于当前 Cookie 会话"),
     )
-    monkeypatch.setattr(authrefresh, "check_requirement", lambda cookie_path: (True, None))
+    monkeypatch.setattr(authrefresh, "check_requirement", lambda cookie_path, proxy: (True, None))
 
     assert cli.main(["--status"]) == 0
     output = capsys.readouterr().err
@@ -241,10 +271,10 @@ def test_status_reports_pending_confirmation_without_retrying_it(
     monkeypatch.setattr(
         cookiestore,
         "validate",
-        lambda cookie_dir: cookiestore.ValidationResult(True, uname="alice"),
+        lambda cookie_dir, proxy: cookiestore.ValidationResult(True, uname="alice"),
     )
     monkeypatch.setattr(cookiestore, "renewal_state", lambda cookie_dir: (state, None))
-    monkeypatch.setattr(authrefresh, "check_requirement", lambda cookie_path: (False, None))
+    monkeypatch.setattr(authrefresh, "check_requirement", lambda cookie_path, proxy: (False, None))
     monkeypatch.setattr(
         authrefresh,
         "confirm_pending",
@@ -547,7 +577,7 @@ def test_prepare_cookie_failure_prints_help(
     monkeypatch.setattr(
         cookiestore,
         "ensure_cookie",
-        lambda cd: cookiestore.EnsureResult(ready=False, messages=[]),
+        lambda cd, proxy: cookiestore.EnsureResult(ready=False, messages=[]),
     )
     assert cli._prepare_cookie(cli.Options()) is False
     err = capsys.readouterr().err
@@ -558,12 +588,16 @@ def test_prepare_cookie_failure_prints_help(
 def test_prepare_cookie_success(monkeypatch: pytest.MonkeyPatch) -> None:
     from bili_dl import cookiestore
 
+    seen: list[str] = []
     monkeypatch.setattr(
         cookiestore,
         "ensure_cookie",
-        lambda cd: cookiestore.EnsureResult(ready=True, messages=[("ok", "ok")]),
+        lambda cd, proxy: (
+            seen.append(proxy) or cookiestore.EnsureResult(ready=True, messages=[("ok", "ok")])
+        ),
     )
-    assert cli._prepare_cookie(cli.Options()) is True
+    assert cli._prepare_cookie(cli.Options(proxy="http://download:7890")) is True
+    assert seen == ["http://download:7890"]
 
 
 def test_run_once_invokes_download(monkeypatch: pytest.MonkeyPatch) -> None:

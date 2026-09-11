@@ -42,7 +42,8 @@ def test_common_args_basic(tmp_path: Path) -> None:
     assert args[idx + 1] == str(cfg.cookie_path)
     idx = args.index("--add-header")
     assert args[idx + 1] == f"Referer:{REFERER}"
-    assert "--proxy" not in args
+    idx = args.index("--proxy")
+    assert args[idx + 1] == ""  # yt-dlp's documented direct-connection value
     assert "--no-check-certificate" not in args
 
 

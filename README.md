@@ -151,7 +151,11 @@ All fields are optional — set only what you need. CLI flags always override
 config file values. Override the config path with `--config FILE`. The
 `cookie_dir` setting is shared by downloads, `--status`, and `login`; use
 `bili-dl login --config FILE` when the configuration itself is stored at a
-non-default path.
+non-default path. The resolved proxy is likewise shared by downloads and all
+Bilibili login/session APIs; `bili-dl login --proxy URL` can override it for a
+single login. Set `proxy = ""` to explicitly ignore proxy environment variables.
+`bili-dl` does not discover, test, or manage proxies; it only honors the value
+the user selected.
 
 ### Batch download
 
@@ -174,8 +178,8 @@ bili-dl --batch-file urls.txt
 | `--all` | video + audio, merged MP4 + extracted M4A (default) |
 | `-v`, `--video` | video only (MP4) |
 | `-a`, `--audio` | audio only (M4A, faststart ISOM) |
-| `-k`, `--insecure` | skip TLS certificate verification |
-| `--proxy URL` | proxy for yt-dlp (env: `HTTPS_PROXY`/`HTTP_PROXY`) |
+| `-k`, `--insecure` | skip yt-dlp TLS verification; login/session APIs remain verified |
+| `--proxy URL` | proxy for downloads and Bilibili APIs (env: `HTTPS_PROXY`/`HTTP_PROXY`) |
 | `--no-color` | disable colored output (also: `NO_COLOR` env var) |
 | `--config FILE` | override config file path |
 | `--batch-file FILE` | download URLs listed in a text file |
