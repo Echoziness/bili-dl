@@ -14,7 +14,10 @@ we degrade gracefully to local-only validation.
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
+import tempfile
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -40,6 +43,14 @@ class EnsureResult:
     """Outcome of the full validate → import → re-validate flow."""
 
     ready: bool
+    messages: list[tuple[str, str]] = field(default_factory=list)
+
+
+@dataclass
+class QrStoreResult:
+    """Outcome of validating and atomically storing a QR-login cookie set."""
+
+    success: bool
     messages: list[tuple[str, str]] = field(default_factory=list)
 
 
@@ -154,6 +165,50 @@ def validate(cookie_dir: Optional[Path] = None) -> ValidationResult:
         valid=False,
         messages=[("warn", "[提示] 现有 Cookie 已失效（服务端返回未登录）")],
     )
+
+
+def store_qr_cookie(cookie_lines: list[str], cookie_dir: Optional[Path] = None) -> QrStoreResult:
+    """Validate QR-login cookies online, then atomically replace the output file.
+
+    The previous cookie file remains untouched unless Bilibili's ``nav`` API
+    confirms the newly received session.  Unlike :func:`validate`, this does
+    not degrade on a network error: a new credential must be proven before it
+    can overwrite a known-good one.
+    """
+    sessdata = _extract_sessdata(cookie_lines)
+    if not sessdata:
+        return QrStoreResult(False, [("error", "[登录] 新会话缺少 SESSDATA，未改动现有 Cookie")])
+
+    data, error = _nav_probe(sessdata)
+    if data is None:
+        detail = "网络错误" if error == "network" else (error or "未知错误")
+        return QrStoreResult(
+            False, [("error", f"[登录] 无法验证新会话（{detail}），未改动现有 Cookie")]
+        )
+    if data.get("code") != 0 or not data.get("data", {}).get("isLogin"):
+        return QrStoreResult(False, [("error", "[登录] 新会话未登录，未改动现有 Cookie")])
+
+    destination = bili_cookie_path(cookie_dir)
+    temp_path: Optional[Path] = None
+    try:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, raw_path = tempfile.mkstemp(
+            prefix=f".{BILI_COOKIE_FILENAME}.", suffix=".tmp", dir=destination.parent
+        )
+        temp_path = Path(raw_path)
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write("\n".join(cookie_lines) + "\n")
+        os.replace(temp_path, destination)
+        temp_path = None
+    except OSError as exc:
+        return QrStoreResult(False, [("error", f"[登录] 无法保存新 Cookie：{exc}")])
+    finally:
+        if temp_path is not None:
+            with contextlib.suppress(OSError):
+                temp_path.unlink()
+
+    uname = data.get("data", {}).get("uname", "?")
+    return QrStoreResult(True, [("ok", f"[登录] 成功 | 已登录: {uname}")])
 
 
 def ensure_cookie(cookie_dir: Optional[Path] = None) -> EnsureResult:

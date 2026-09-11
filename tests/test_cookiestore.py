@@ -213,6 +213,40 @@ def test_validate_logged_in_no_uname(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert result.uname == "?"
 
 
+def test_store_qr_cookie_validates_before_replacing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unverified QR session must never overwrite a pre-existing cookie file."""
+    old = store.bili_cookie_path(tmp_path)
+    old.parent.mkdir(parents=True, exist_ok=True)
+    old.write_text("old-cookie\n", encoding="utf-8")
+    monkeypatch.setattr(store, "_nav_probe", lambda s: ({"code": -101, "data": {}}, None))
+
+    result = store.store_qr_cookie([".bilibili.com\tTRUE\t/\tTRUE\t0\tSESSDATA\tnew"], tmp_path)
+
+    assert result.success is False
+    assert old.read_text(encoding="utf-8") == "old-cookie\n"
+
+
+def test_store_qr_cookie_replaces_after_online_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        store,
+        "_nav_probe",
+        lambda s: ({"code": 0, "data": {"isLogin": True, "uname": "qr-user"}}, None),
+    )
+
+    result = store.store_qr_cookie(
+        ["# Netscape HTTP Cookie File", ".bilibili.com\tTRUE\t/\tTRUE\t0\tSESSDATA\tnew"],
+        tmp_path,
+    )
+
+    assert result.success is True
+    assert "SESSDATA\tnew" in store.bili_cookie_path(tmp_path).read_text(encoding="utf-8")
+    assert any("qr-user" in text for _, text in result.messages)
+
+
 # ─── ensure_cookie: orchestration branches ───────────────────────────────────
 
 

@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added — Experimental QR login feasibility test
+
+- `bili-dl login` opens an isolated Bilibili Web QR-login session. It never
+  reads a browser profile or browser cookies, and does not require a specific
+  browser to exist on the user's machine.
+- QR rendering is an optional `bili-dl[login]` extra (`qrcode`); normal
+  downloading retains its zero-runtime-dependency installation.
+- The received Bilibili-only cookie set is checked with `nav` before an
+  atomic replacement of `cookies_bilibili.txt`; a failed or unreachable check
+  leaves any existing cookie file untouched.
+
+### Not included yet
+
+- This intentionally does not persist Bilibili's Web refresh credential or
+  attempt automatic session renewal. It exists solely to validate that a
+  browser-independent QR session works in users' real environments.
+
 ## [0.3.0] - 2026-08-14
 
 ### Changed — Line-ending normalization

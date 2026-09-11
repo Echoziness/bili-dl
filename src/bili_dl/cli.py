@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from . import __version__, cookiestore, downloader, settings, ui
+from . import __version__, authqr, cookiestore, downloader, settings, ui
 from . import ffmpeg as ff
 from .config import VALID_MODES
 from .downloader import DownloadConfig
@@ -74,6 +74,7 @@ examples:
   bili-dl https://www.bilibili.com/video/BV...     # video + audio (default)
   bili-dl -a https://www.bilibili.com/video/BV...  # audio only (M4A)
   bili-dl --batch-file urls.txt                    # batch download
+  bili-dl login                                    # QR login (install bili-dl[login])
   bili-dl                                          # interactive REPL
 
 report issues: https://github.com/Echoziness/bili-dl/issues\
@@ -172,6 +173,23 @@ def _build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _build_login_parser() -> argparse.ArgumentParser:
+    """Parser for the deliberately separate, interactive ``bili-dl login`` command."""
+    p = argparse.ArgumentParser(
+        prog="bili-dl login",
+        description="Use the Bilibili App to create a standalone QR-login session.",
+    )
+    p.add_argument(
+        "--cookie-dir",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help=f"override cookie directory (default: {config_dir()})",
+    )
+    p.add_argument("--no-color", action="store_true", help="disable colored output")
+    return p
+
+
 def _load_settings(config_path: Optional[Path]) -> settings.Settings:
     """Load config.toml, returning empty Settings on missing file."""
     path = config_path or config_file_path()
@@ -239,11 +257,55 @@ def _prepare_cookie(opts: Options) -> bool:
     base_dir = opts.cookie_dir or config_dir()
     print(file=sys.stderr)
     ui.error("[失败] 没有可用的 B 站 Cookie。")
+    ui.warn("  可运行 bili-dl login，用 B 站 App 扫码建立独立登录会话；或")
     ui.warn("  请先在浏览器登录 bilibili.com，然后导出 Cookie（Netscape 格式），")
     ui.warn(f"  将导出的 .txt 文件放入以下目录：{base_dir}")
     ui.warn("  支持任意文件名，只要文件包含 bilibili 条目即可自动识别。")
     print(file=sys.stderr)
     return False
+
+
+def _login_command(argv: list[str]) -> int:
+    """Run the minimal opt-in QR-login experiment without checking yt-dlp."""
+    args = _build_login_parser().parse_args(argv)
+    if args.no_color:
+        ui.disable_color()
+    if not sys.stdin.isatty():
+        ui.error("[错误] 扫码登录需要交互终端")
+        return 1
+    if not authqr.qrcode_available():
+        ui.error("[错误] 未安装扫码登录组件")
+        ui.info('请安装: pip install "bili-dl[login]"')
+        return 1
+
+    cookie_dir = args.cookie_dir or config_dir()
+    try:
+        ensure_dir(cookie_dir)
+    except OSError as exc:
+        ui.error(f"[错误] 无法创建 Cookie 目录: {exc}")
+        return 1
+
+    start = authqr.start()
+    _emit(start.messages)
+    if start.session is None:
+        return 1
+    try:
+        image = authqr.render_terminal_qr(start.session.url)
+    except Exception as exc:
+        ui.error(f"[错误] 无法渲染二维码: {exc}")
+        return 1
+
+    ui.info("请使用 B 站 App 扫描二维码并在手机上确认（最长 180 秒）")
+    print(file=sys.stderr)
+    print(image, file=sys.stderr)
+    print(file=sys.stderr)
+    result = authqr.poll(start.session)
+    _emit(result.messages)
+    if not result.success:
+        return 1
+    stored = cookiestore.store_qr_cookie(result.cookie_lines, cookie_dir)
+    _emit(stored.messages)
+    return 0 if stored.success else 1
 
 
 def _run_once(opts: Options, url: str, ytdlp: str, ffmpeg_bin: Optional[str]) -> bool:
@@ -320,8 +382,12 @@ def main(argv: Optional[list[str]] = None) -> int:
 
 
 def _main_impl(argv: Optional[list[str]] = None) -> int:
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    if raw_argv and raw_argv[0] == "login":
+        return _login_command(raw_argv[1:])
+
     parser = _build_parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(raw_argv)
 
     # Handle --no-color before anything else (clig.dev §Output) --------------
     if args.no_color:

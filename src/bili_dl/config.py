@@ -5,6 +5,8 @@ from __future__ import annotations
 # Bilibili endpoints
 NAV_API = "https://api.bilibili.com/x/web-interface/nav"
 REFERER = "https://www.bilibili.com"
+QR_GENERATE_API = "https://passport.bilibili.com/x/passport-login/web/qrcode/generate"
+QR_POLL_API = "https://passport.bilibili.com/x/passport-login/web/qrcode/poll"
 
 # User-Agent for the nav validity probe. Bilibili returns HTTP 412 to
 # urllib's default "Python-urllib/x.y" UA — must masquerade as a browser.
@@ -39,6 +41,13 @@ VALID_MODES = ("all", "v", "a")
 # HTTP timeout for the nav validity probe (seconds). 5s matches the original
 # bd.ps1; on flaky networks we gracefully degrade to local-only validation.
 NAV_TIMEOUT = 5.0
+
+# Web QR login limits.  The Bilibili-issued QR key itself expires after about
+# 180 seconds; polling once a second matches the browser flow without making
+# unnecessary requests.
+QR_TIMEOUT = 10.0
+QR_LOGIN_MAX_POLLS = 180
+QR_POLL_INTERVAL = 1.0
 
 # Repair-AudioContainer: minimum ratio of (new size / original size) for the
 # remuxed file to be considered successful. Guards against truncated output.

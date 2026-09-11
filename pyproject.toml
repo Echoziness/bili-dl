@@ -27,6 +27,11 @@ classifiers = [
 ]
 dependencies = []
 
+[project.optional-dependencies]
+# Kept out of the core package: downloading remains zero-runtime-dependency.
+# The QR renderer is only imported by ``bili-dl login``.
+login = ["qrcode>=8"]
+
 [project.scripts]
 bili-dl = "bili_dl.cli:main"
 

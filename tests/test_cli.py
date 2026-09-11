@@ -7,6 +7,8 @@ any network or subprocess.
 
 from __future__ import annotations
 
+import http.cookiejar
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -69,6 +71,11 @@ def test_url_positional() -> None:
     assert _parse(url).url == url
 
 
+def test_login_parser_cookie_dir() -> None:
+    args = cli._build_login_parser().parse_args(["--cookie-dir", "/tmp/cookies"])
+    assert args.cookie_dir == Path("/tmp/cookies")
+
+
 # ─── main() with mocked dependencies ────────────────────────────────────────
 
 
@@ -91,6 +98,35 @@ def test_main_non_interactive_success(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cli, "_prepare_cookie", lambda opts: True)
     monkeypatch.setattr(cli, "_run_once", lambda opts, url, ytdlp, ffmpeg_bin: True)
     assert cli.main(["https://bilibili.com/video/BV1"]) == 0
+
+
+def test_login_does_not_require_ytdlp(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The login experiment is independent from yt-dlp and download setup."""
+    from bili_dl import authqr, cookiestore
+
+    session = authqr.QrSession(
+        url="https://passport.bilibili.com/qr",
+        key="key",
+        jar=http.cookiejar.CookieJar(),
+        opener=urllib.request.build_opener(),
+    )
+    monkeypatch.setattr(authqr, "qrcode_available", lambda: True)
+    monkeypatch.setattr(authqr, "start", lambda: authqr.QrStartResult(session=session))
+    monkeypatch.setattr(authqr, "render_terminal_qr", lambda url: "QR")
+    monkeypatch.setattr(
+        authqr,
+        "poll",
+        lambda s: authqr.QrPollResult(
+            True, cookie_lines=[".bilibili.com\tTRUE\t/\tTRUE\t0\tSESSDATA\tx"]
+        ),
+    )
+    monkeypatch.setattr(
+        cookiestore, "store_qr_cookie", lambda lines, d: cookiestore.QrStoreResult(True)
+    )
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr(downloader, "find_ytdlp", lambda: None)
+
+    assert cli.main(["login", "--cookie-dir", str(tmp_path)]) == 0
 
 
 def test_main_non_interactive_failure(monkeypatch: pytest.MonkeyPatch) -> None:

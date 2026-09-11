@@ -50,6 +50,39 @@ bili-dl -V                   # verify
 
 ### Cookies (one-time)
 
+#### Experimental: scan a QR code (recommended for this test build)
+
+This test build can create a **separate Bilibili Web login session** by
+scanning a QR code with the Bilibili App. It does not read your browser
+profile, inspect browser cookies, or require a particular browser.
+
+Install the small, optional QR-rendering component, then run:
+
+```bash
+pip install "bili-dl[login]"
+bili-dl login
+```
+
+For a `pipx` installation, install the extra at install time:
+
+```bash
+pipx install "bili-dl[login]"
+bili-dl login
+```
+
+The command displays a QR code in an interactive terminal. Scan and confirm
+it in the Bilibili App. On success, it verifies the newly issued session with
+Bilibili before atomically replacing `cookies_bilibili.txt`; your normal
+download command can then reuse it. `bili-dl login` deliberately does not
+need `yt-dlp` or `ffmpeg`, so it can be tested on its own.
+
+This is only a login feasibility test: it does **not** yet save Bilibili's
+refresh credential or refresh an expired session automatically. Run `bili-dl
+login` again when a session expires. The full version will build on this flow
+only after it has been validated in real use.
+
+#### Import an existing browser export
+
 Bilibili requires a login cookie. Use any browser extension that exports
 cookies in **Netscape format** (Cookie-Editor, Get cookies.txt, etc.):
 
@@ -142,10 +175,13 @@ bili-dl --batch-file urls.txt
 
 - Only Bilibili-domain cookie lines are kept; all others are discarded in
   memory — never written to disk or sent anywhere.
-- Network requests go only to `api.bilibili.com` (login probe) and the URLs
-  you provide (via `yt-dlp`). No telemetry, no analytics.
-- `cookies_bilibili.txt` is created with a timestamped backup before any
-  overwrite.
+- `bili-dl login` communicates only with Bilibili's login and session-check
+  endpoints; it does not access any browser profile or send data to a third
+  party. Downloads contact the URLs you provide through `yt-dlp`. No
+  telemetry or analytics.
+- Browser-imported cookies are backed up before replacement. QR-login cookies
+  replace the destination atomically, but only after an online Bilibili
+  session check succeeds; a failed check leaves the prior file untouched.
 
 ## Windows: Controlled Folder Access
 
