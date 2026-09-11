@@ -260,11 +260,91 @@ def test_store_qr_session_saves_refresh_token_after_cookie_validation(
     saved: list[authstate.AuthState] = []
     monkeypatch.setattr(authstate, "save", lambda state, cookie_dir: saved.append(state) or None)
 
-    result = store.store_qr_session(["cookie"], "refresh-token", tmp_path)
+    lines = [".bilibili.com\tTRUE\t/\tTRUE\t0\tSESSDATA\tsession"]
+    result = store.store_qr_session(lines, "refresh-token", tmp_path)
 
     assert result.success is True
-    assert saved == [authstate.AuthState("refresh-token")]
+    fingerprint = store._session_fingerprint(lines)
+    assert fingerprint is not None
+    assert saved == [authstate.AuthState("refresh-token", fingerprint)]
     assert any("每日会话续期" in text for _, text in result.messages)
+
+
+def test_store_qr_session_without_token_removes_stale_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from bili_dl import authstate
+
+    authstate.path(tmp_path).write_text("stale", encoding="utf-8")
+    monkeypatch.setattr(
+        store,
+        "store_qr_cookie",
+        lambda lines, cookie_dir: store.QrStoreResult(True, [("ok", "stored")]),
+    )
+
+    result = store.store_qr_session(
+        [".bilibili.com\tTRUE\t/\tTRUE\t0\tSESSDATA\tnew-session"], None, tmp_path
+    )
+
+    assert result.success is True
+    assert not authstate.path(tmp_path).exists()
+    assert any("未返回续期凭证" in text for _, text in result.messages)
+
+
+def test_store_qr_session_state_write_failure_removes_stale_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from bili_dl import authstate
+
+    authstate.path(tmp_path).write_text("stale", encoding="utf-8")
+    monkeypatch.setattr(
+        store,
+        "store_qr_cookie",
+        lambda lines, cookie_dir: store.QrStoreResult(True, [("ok", "stored")]),
+    )
+    monkeypatch.setattr(authstate, "save", lambda state, cookie_dir: "无法保存刷新凭证状态")
+
+    result = store.store_qr_session(
+        [".bilibili.com\tTRUE\t/\tTRUE\t0\tSESSDATA\tnew-session"],
+        "new-token",
+        tmp_path,
+    )
+
+    assert result.success is True
+    assert not authstate.path(tmp_path).exists()
+    assert any("自动续期不可用" in text for _, text in result.messages)
+
+
+def test_renewal_state_rejects_token_from_another_cookie_session(tmp_path: Path) -> None:
+    from bili_dl import authstate
+
+    _make_cookie_dir(tmp_path)
+    assert authstate.save(authstate.AuthState("token", "wrong-fingerprint"), tmp_path) is None
+
+    state, error = store.renewal_state(tmp_path)
+
+    assert state is None
+    assert error is not None and "不属于当前 Cookie 会话" in error
+
+
+def test_renew_if_due_never_sends_a_mismatched_refresh_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from bili_dl import authrefresh, authstate
+
+    _make_cookie_dir(tmp_path)
+    assert (
+        authstate.save(authstate.AuthState("must-not-send", "wrong-fingerprint"), tmp_path) is None
+    )
+
+    def fail_if_called(path: Path, token: str) -> authrefresh.RenewalResult:
+        raise AssertionError("mismatched refresh token was sent")
+
+    monkeypatch.setattr(authrefresh, "check_and_refresh", fail_if_called)
+
+    messages = store._renew_if_due(tmp_path)
+
+    assert any("不属于当前 Cookie 会话" in text for _, text in messages)
 
 
 def test_renew_if_due_records_successful_daily_check(
@@ -273,7 +353,11 @@ def test_renew_if_due_records_successful_daily_check(
     from bili_dl import authrefresh, authstate
 
     monkeypatch.setattr(store, "_utc_today", lambda: "2026-09-11")
-    monkeypatch.setattr(authstate, "load", lambda cookie_dir: (authstate.AuthState("token"), None))
+    monkeypatch.setattr(
+        store,
+        "renewal_state",
+        lambda cookie_dir: (authstate.AuthState("token", "fingerprint"), None),
+    )
     monkeypatch.setattr(
         authrefresh,
         "check_and_refresh",
@@ -283,7 +367,7 @@ def test_renew_if_due_records_successful_daily_check(
     monkeypatch.setattr(authstate, "save", lambda state, cookie_dir: saved.append(state) or None)
 
     assert store._renew_if_due(tmp_path) == []
-    assert saved == [authstate.AuthState("token", "2026-09-11")]
+    assert saved == [authstate.AuthState("token", "fingerprint", "2026-09-11")]
 
 
 def test_renew_if_due_persists_new_session_before_confirming_old_token(
@@ -292,7 +376,11 @@ def test_renew_if_due_persists_new_session_before_confirming_old_token(
     from bili_dl import authrefresh, authstate
 
     monkeypatch.setattr(store, "_utc_today", lambda: "2026-09-11")
-    monkeypatch.setattr(authstate, "load", lambda cookie_dir: (authstate.AuthState("old"), None))
+    monkeypatch.setattr(
+        store,
+        "renewal_state",
+        lambda cookie_dir: (authstate.AuthState("old", "old-fingerprint"), None),
+    )
     renewal = authrefresh.RenewalResult(
         checked=True,
         refreshed=True,
@@ -315,7 +403,13 @@ def test_renew_if_due_persists_new_session_before_confirming_old_token(
 
     result = store._renew_if_due(tmp_path)
 
-    assert saved == [authstate.AuthState("new", "2026-09-11")]
+    assert saved == [
+        authstate.AuthState(
+            "new",
+            store._session_fingerprint(renewal.cookie_lines) or "",
+            "2026-09-11",
+        )
+    ]
     assert confirmed == [True]
     assert ("ok", "new-cookie") in result
 

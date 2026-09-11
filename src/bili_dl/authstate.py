@@ -1,7 +1,9 @@
 """Durable, narrowly scoped state for Bilibili Web-session renewal.
 
 The refresh token is deliberately kept out of ``config.toml``: it is a
-credential, not a user preference.  It lives beside the already sensitive
+credential, not a user preference.  A one-way SESSDATA fingerprint binds it
+to the Cookie session it can refresh, preventing an old token from being used
+after Cookie replacement.  The state lives beside the already sensitive
 ``cookies_bilibili.txt`` file, is written atomically, and gets mode ``0600``
 on POSIX.  On Windows the default AppData directory is already per-user.
 """
@@ -25,6 +27,7 @@ class AuthState:
     """The credentials and throttle marker required by the renewal protocol."""
 
     refresh_token: str
+    session_fingerprint: str
     last_refresh_check_utc: Optional[str] = None
 
 
@@ -42,15 +45,20 @@ def load(cookie_dir: Optional[Path] = None) -> tuple[Optional[AuthState], Option
         raw = json.loads(state_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None, "刷新凭证状态文件不可读取"
-    if not isinstance(raw, dict) or not isinstance(raw.get("refresh_token"), str):
+    if (
+        not isinstance(raw, dict)
+        or not isinstance(raw.get("refresh_token"), str)
+        or not isinstance(raw.get("session_fingerprint"), str)
+    ):
         return None, "刷新凭证状态文件格式无效"
     token = raw["refresh_token"]
-    if not token:
+    fingerprint = raw["session_fingerprint"]
+    if not token or not fingerprint:
         return None, "刷新凭证状态文件格式无效"
     last_check = raw.get("last_refresh_check_utc")
     if last_check is not None and not isinstance(last_check, str):
         return None, "刷新凭证状态文件格式无效"
-    return AuthState(token, last_check), None
+    return AuthState(token, fingerprint, last_check), None
 
 
 def save(state: AuthState, cookie_dir: Optional[Path] = None) -> Optional[str]:
@@ -75,4 +83,13 @@ def save(state: AuthState, cookie_dir: Optional[Path] = None) -> Optional[str]:
         if temp_path is not None:
             with contextlib.suppress(OSError):
                 temp_path.unlink()
+    return None
+
+
+def remove(cookie_dir: Optional[Path] = None) -> Optional[str]:
+    """Remove renewal state; return a display-safe error on failure."""
+    try:
+        path(cookie_dir).unlink(missing_ok=True)
+    except OSError:
+        return "无法清除旧刷新凭证状态"
     return None

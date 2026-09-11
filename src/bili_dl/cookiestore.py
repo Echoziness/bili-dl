@@ -15,6 +15,7 @@ we degrade gracefully to local-only validation.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import os
 import tempfile
@@ -80,6 +81,33 @@ def _extract_sessdata(lines: list[str]) -> Optional[str]:
         ):
             return fields[6]
     return None
+
+
+def _session_fingerprint(lines: list[str]) -> Optional[str]:
+    """Return a non-secret identifier binding renewal state to one session."""
+    sessdata = _extract_sessdata(lines)
+    if not sessdata:
+        return None
+    return hashlib.sha256(sessdata.encode("utf-8")).hexdigest()
+
+
+def _current_session_fingerprint(cookie_dir: Optional[Path]) -> Optional[str]:
+    return _session_fingerprint(read_lines(bili_cookie_path(cookie_dir)))
+
+
+def renewal_state(
+    cookie_dir: Optional[Path] = None,
+) -> tuple[Optional[authstate.AuthState], Optional[str]]:
+    """Load renewal state only when it belongs to the current Cookie session."""
+    state, error = authstate.load(cookie_dir)
+    if state is None:
+        return None, error
+    fingerprint = _current_session_fingerprint(cookie_dir)
+    if fingerprint is None:
+        return None, "当前 Cookie 缺少可识别的会话信息"
+    if fingerprint != state.session_fingerprint:
+        return None, "刷新凭证不属于当前 Cookie 会话，请重新运行 bili-dl login"
+    return state, None
 
 
 def _nav_probe(sessdata: str) -> tuple[Optional[dict[str, Any]], Optional[str]]:
@@ -232,12 +260,25 @@ def store_qr_session(
     result = store_qr_cookie(cookie_lines, cookie_dir)
     if not result.success:
         return result
-    if not refresh_token:
-        result.messages.append(("warn", "[登录] B 站未返回续期凭证，需在会话失效后重新扫码"))
+    fingerprint = _session_fingerprint(cookie_lines)
+    if fingerprint is None:
+        error = authstate.remove(cookie_dir)
+        result.messages.append(("warn", "[登录] 无法识别新会话，自动续期未启用"))
+        if error:
+            result.messages.append(("warn", f"[登录] {error}"))
         return result
-    error = authstate.save(authstate.AuthState(refresh_token), cookie_dir)
+    if not refresh_token:
+        error = authstate.remove(cookie_dir)
+        result.messages.append(("warn", "[登录] B 站未返回续期凭证，需在会话失效后重新扫码"))
+        if error:
+            result.messages.append(("warn", f"[登录] {error}"))
+        return result
+    error = authstate.save(authstate.AuthState(refresh_token, fingerprint), cookie_dir)
     if error:
+        clear_error = authstate.remove(cookie_dir)
         result.messages.append(("warn", f"[登录] 会话已保存，但自动续期不可用：{error}"))
+        if clear_error:
+            result.messages.append(("warn", f"[登录] {clear_error}"))
     else:
         result.messages.append(("info", "[登录] 已启用每日会话续期检查"))
     return result
@@ -250,7 +291,7 @@ def _utc_today() -> str:
 
 def _renew_if_due(cookie_dir: Optional[Path]) -> list[tuple[str, str]]:
     """Refresh a verified session only when Bilibili requests it for the day."""
-    state, error = authstate.load(cookie_dir)
+    state, error = renewal_state(cookie_dir)
     if error:
         return [("warn", f"[登录] 自动续期不可用：{error}")]
     if state is None or state.last_refresh_check_utc == _utc_today():
@@ -261,7 +302,10 @@ def _renew_if_due(cookie_dir: Optional[Path]) -> list[tuple[str, str]]:
     if not renewal.checked:
         return messages
     if not renewal.refreshed:
-        error = authstate.save(authstate.AuthState(state.refresh_token, _utc_today()), cookie_dir)
+        error = authstate.save(
+            authstate.AuthState(state.refresh_token, state.session_fingerprint, _utc_today()),
+            cookie_dir,
+        )
         if error:
             messages.append(("warn", f"[登录] 无法记录每日续期检查：{error}"))
         return messages
@@ -272,9 +316,18 @@ def _renew_if_due(cookie_dir: Optional[Path]) -> list[tuple[str, str]]:
     messages.extend(stored.messages)
     if not stored.success or renewal.refresh_token is None:
         return messages
-    error = authstate.save(authstate.AuthState(renewal.refresh_token, _utc_today()), cookie_dir)
+    fingerprint = _session_fingerprint(renewal.cookie_lines)
+    if fingerprint is None:
+        messages.append(("warn", "[登录] 新会话无法绑定续期凭证，自动续期不可用"))
+        return messages
+    error = authstate.save(
+        authstate.AuthState(renewal.refresh_token, fingerprint, _utc_today()), cookie_dir
+    )
     if error:
+        clear_error = authstate.remove(cookie_dir)
         messages.append(("warn", f"[登录] 新会话已保存，但自动续期不可用：{error}"))
+        if clear_error:
+            messages.append(("warn", f"[登录] {clear_error}"))
         return messages
     error = authrefresh.confirm(renewal)
     if error:

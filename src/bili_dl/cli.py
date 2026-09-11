@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from . import __version__, authqr, authrefresh, authstate, cookiestore, downloader, settings, ui
+from . import __version__, authqr, authrefresh, cookiestore, downloader, settings, ui
 from . import ffmpeg as ff
 from .config import VALID_MODES
 from .downloader import DownloadConfig
@@ -317,6 +317,7 @@ def _login_command(argv: list[str]) -> int:
 def _status_command(opts: Options) -> int:
     """Report meaningful session facts without downloading, refreshing, or prompting."""
     result = cookiestore.validate(opts.cookie_dir)
+    state, state_error = cookiestore.renewal_state(opts.cookie_dir)
     if result.valid and result.uname is not None:
         ui.ok(f"[状态] 已登录: {result.uname}")
     elif result.valid:
@@ -330,15 +331,17 @@ def _status_command(opts: Options) -> int:
             cookiestore.bili_cookie_path(opts.cookie_dir)
         )
         if required is True:
-            ui.warn("[状态] B 站当前要求续期: 是（下次下载会自动处理）")
+            if state is not None:
+                ui.warn("[状态] B 站当前要求续期: 是（下次下载会自动处理）")
+            else:
+                ui.warn("[状态] B 站当前要求续期: 是（当前会话无法自动处理）")
         elif required is False:
             ui.ok("[状态] B 站当前要求续期: 否")
         else:
             ui.warn(f"[状态] B 站续期状态: 暂时无法确认（{error or '未知错误'}）")
 
-    state, error = authstate.load(opts.cookie_dir)
-    if error:
-        ui.warn(f"[状态] 自动续期: 不可用（{error}）")
+    if state_error:
+        ui.warn(f"[状态] 自动续期: 不可用（{state_error}）")
     elif state is None:
         ui.warn("[状态] 自动续期: 未启用（运行 bili-dl login 可启用）")
     else:

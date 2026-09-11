@@ -145,9 +145,9 @@ def test_status_does_not_require_downloader_or_trigger_renewal(
         lambda cookie_dir: cookiestore.ValidationResult(True, uname="alice"),
     )
     monkeypatch.setattr(
-        authstate,
-        "load",
-        lambda cookie_dir: (authstate.AuthState("token", "2026-09-11"), None),
+        cookiestore,
+        "renewal_state",
+        lambda cookie_dir: (authstate.AuthState("token", "fingerprint", "2026-09-11"), None),
     )
     monkeypatch.setattr(authrefresh, "check_requirement", lambda cookie_path: (False, None))
     monkeypatch.setattr(downloader, "find_ytdlp", lambda: None)
@@ -156,14 +156,37 @@ def test_status_does_not_require_downloader_or_trigger_renewal(
 
 
 def test_status_invalid_cookie_returns_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    from bili_dl import authstate, cookiestore
+    from bili_dl import cookiestore
 
     monkeypatch.setattr(
         cookiestore, "validate", lambda cookie_dir: cookiestore.ValidationResult(False)
     )
-    monkeypatch.setattr(authstate, "load", lambda cookie_dir: (None, None))
+    monkeypatch.setattr(cookiestore, "renewal_state", lambda cookie_dir: (None, None))
 
     assert cli.main(["--status"]) == 1
+
+
+def test_status_does_not_promise_renewal_without_matching_state(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.Capture
+) -> None:
+    from bili_dl import authrefresh, cookiestore
+
+    monkeypatch.setattr(
+        cookiestore,
+        "validate",
+        lambda cookie_dir: cookiestore.ValidationResult(True, uname="alice"),
+    )
+    monkeypatch.setattr(
+        cookiestore,
+        "renewal_state",
+        lambda cookie_dir: (None, "刷新凭证不属于当前 Cookie 会话"),
+    )
+    monkeypatch.setattr(authrefresh, "check_requirement", lambda cookie_path: (True, None))
+
+    assert cli.main(["--status"]) == 0
+    output = capsys.readouterr().err
+    assert "当前会话无法自动处理" in output
+    assert "下次下载会自动处理" not in output
 
 
 def test_main_non_interactive_failure(monkeypatch: pytest.MonkeyPatch) -> None:
