@@ -76,6 +76,11 @@ def test_login_parser_cookie_dir() -> None:
     assert args.cookie_dir == Path("/tmp/cookies")
 
 
+def test_login_parser_config() -> None:
+    args = cli._build_login_parser().parse_args(["--config", "/tmp/config.toml"])
+    assert args.config == Path("/tmp/config.toml")
+
+
 def test_status_flag() -> None:
     assert _parse("--status").status is True
 
@@ -131,6 +136,44 @@ def test_login_does_not_require_ytdlp(monkeypatch: pytest.MonkeyPatch, tmp_path:
     monkeypatch.setattr(downloader, "find_ytdlp", lambda: None)
 
     assert cli.main(["login", "--cookie-dir", str(tmp_path)]) == 0
+
+
+def test_login_uses_cookie_dir_from_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from bili_dl import authqr, cookiestore
+
+    configured_dir = tmp_path / "configured-cookies"
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(f'cookie_dir = "{configured_dir.as_posix()}"\n', encoding="utf-8")
+    session = authqr.QrSession(
+        url="https://passport.bilibili.com/qr",
+        key="key",
+        jar=http.cookiejar.CookieJar(),
+        opener=urllib.request.build_opener(),
+    )
+    monkeypatch.setattr(authqr, "qrcode_available", lambda: True)
+    monkeypatch.setattr(authqr, "start", lambda: authqr.QrStartResult(session=session))
+    monkeypatch.setattr(authqr, "render_terminal_qr", lambda url: "QR")
+    monkeypatch.setattr(
+        authqr,
+        "poll",
+        lambda current: authqr.QrPollResult(
+            True,
+            cookie_lines=[".bilibili.com\tTRUE\t/\tTRUE\t0\tSESSDATA\tx"],
+            refresh_token="token",
+        ),
+    )
+    stored_in: list[Path] = []
+    monkeypatch.setattr(
+        cookiestore,
+        "store_qr_session",
+        lambda lines, token, directory: (
+            stored_in.append(directory) or cookiestore.QrStoreResult(True)
+        ),
+    )
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+
+    assert cli.main(["login", "--config", str(config_path)]) == 0
+    assert stored_in == [configured_dir]
 
 
 def test_status_does_not_require_downloader_or_trigger_renewal(

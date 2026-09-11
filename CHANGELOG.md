@@ -37,13 +37,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Bilibili's current renewal requirement, and whether automatic renewal is
   enabled. It needs no download tools and never downloads, prompts, or
   refreshes a session.
+- `bili-dl login` now reads `config.toml` (or `--config FILE`) so a configured
+  `cookie_dir` is shared consistently by login, status checks, and downloads.
 
 ### Tests
 
 - Added protocol and transaction coverage for QR refresh-token receipt,
   refresh-state atomic storage, daily no-refresh checks, staged Cookie
   replacement, session-binding rejection, and old-token confirmation
-  (203 tests; total coverage 85%).
+  (205 tests; total coverage 85%).
 
 ## [0.3.0] - 2026-08-14
 

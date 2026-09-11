@@ -192,6 +192,13 @@ def _build_login_parser() -> argparse.ArgumentParser:
         metavar="DIR",
         help=f"override cookie directory (default: {config_dir()})",
     )
+    p.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        metavar="FILE",
+        help=f"override config file path (default: {config_file_path()})",
+    )
     p.add_argument("--no-color", action="store_true", help="disable colored output")
     return p
 
@@ -284,7 +291,8 @@ def _login_command(argv: list[str]) -> int:
         ui.info("请重新安装: pip install -U bili-dl")
         return 1
 
-    cookie_dir = args.cookie_dir or config_dir()
+    cfg = _load_settings(args.config)
+    cookie_dir = args.cookie_dir or cfg.cookie_dir or config_dir()
     try:
         ensure_dir(cookie_dir)
     except OSError as exc:

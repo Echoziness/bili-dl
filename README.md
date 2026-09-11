@@ -144,7 +144,10 @@ cookie_dir = "/path/to/cookies"
 ```
 
 All fields are optional — set only what you need. CLI flags always override
-config file values. Override the config path with `--config FILE`.
+config file values. Override the config path with `--config FILE`. The
+`cookie_dir` setting is shared by downloads, `--status`, and `login`; use
+`bili-dl login --config FILE` when the configuration itself is stored at a
+non-default path.
 
 ### Batch download
 
