@@ -26,8 +26,18 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Optional
 
+from filelock import FileLock
+from filelock import Timeout as FileLockTimeout
+
 from . import authrefresh, authstate
-from .config import BILI_COOKIE_FILENAME, NAV_API, NAV_TIMEOUT, USER_AGENT
+from .config import (
+    AUTH_LOCK_FILENAME,
+    AUTH_LOCK_TIMEOUT,
+    BILI_COOKIE_FILENAME,
+    NAV_API,
+    NAV_TIMEOUT,
+    USER_AGENT,
+)
 from .cookiesource import find_source, import_cookie, read_lines
 from .paths import config_dir
 
@@ -59,6 +69,12 @@ class QrStoreResult:
 
 def bili_cookie_path(cookie_dir: Optional[Path] = None) -> Path:
     return (cookie_dir or config_dir()) / BILI_COOKIE_FILENAME
+
+
+def _auth_lock(cookie_dir: Optional[Path]) -> FileLock:
+    """Return the cross-process lock protecting Cookie/renewal state updates."""
+    lock_path = (cookie_dir or config_dir()) / AUTH_LOCK_FILENAME
+    return FileLock(lock_path, timeout=AUTH_LOCK_TIMEOUT)
 
 
 def _extract_cookie_value(lines: list[str], name: str) -> Optional[str]:
@@ -257,6 +273,16 @@ def store_qr_session(
     result explicitly reports that automatic renewal is unavailable instead
     of pretending that the credential was durably stored.
     """
+    try:
+        with _auth_lock(cookie_dir):
+            return _store_qr_session_locked(cookie_lines, refresh_token, cookie_dir)
+    except (FileLockTimeout, OSError):
+        return QrStoreResult(False, [("error", "[登录] 另一项登录或续期操作正在进行，请稍后重试")])
+
+
+def _store_qr_session_locked(
+    cookie_lines: list[str], refresh_token: Optional[str], cookie_dir: Optional[Path]
+) -> QrStoreResult:
     result = store_qr_cookie(cookie_lines, cookie_dir)
     if not result.success:
         return result
@@ -296,6 +322,15 @@ def _utc_today() -> str:
 
 
 def _renew_if_due(cookie_dir: Optional[Path]) -> list[tuple[str, str]]:
+    """Serialize and run the failure-tolerant daily renewal transaction."""
+    try:
+        with _auth_lock(cookie_dir):
+            return _renew_if_due_locked(cookie_dir)
+    except (FileLockTimeout, OSError):
+        return [("warn", "[登录] 另一项登录或续期操作正在进行，本次跳过自动续期")]
+
+
+def _renew_if_due_locked(cookie_dir: Optional[Path]) -> list[tuple[str, str]]:
     """Refresh a verified session only when Bilibili requests it for the day."""
     state, error = renewal_state(cookie_dir)
     if error:

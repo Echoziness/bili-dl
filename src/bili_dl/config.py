@@ -56,7 +56,11 @@ QR_POLL_INTERVAL = 1.0
 # Web Cookie renewal endpoints use the same short, failure-tolerant network
 # budget as the normal login probe.  A renewal check is throttled to once per
 # UTC day, with an explicit re-login remaining the fallback for every error.
+# The cross-process lock covers only login/renewal state changes; contention
+# never blocks a download that already has a valid Cookie.
 AUTH_STATE_FILENAME = "auth_state.json"
+AUTH_LOCK_FILENAME = ".auth_state.lock"
+AUTH_LOCK_TIMEOUT = 5.0
 
 # Repair-AudioContainer: minimum ratio of (new size / original size) for the
 # remuxed file to be considered successful. Guards against truncated output.

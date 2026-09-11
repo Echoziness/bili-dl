@@ -79,6 +79,10 @@ temporarily unreachable, it is recorded and retried before a later renewal
 check. This check never opens a QR prompt; a transient renewal error leaves a
 currently valid Cookie usable and reports a warning instead.
 
+Login and renewal updates use a cross-process lock. If another `bili-dl`
+process is already updating the session, a download keeps using its valid
+Cookie and skips only that invocation's renewal attempt.
+
 This is **not** a promise of permanent login. Bilibili can still invalidate a
 session for expiry, account security, or risk control. In that case, run
 `bili-dl login` again. If you logged in with an earlier test build, run it
@@ -195,6 +199,9 @@ bili-dl --batch-file urls.txt
   only when server confirmation must be retried. It is therefore Git-ignored
   along with its atomic-write temporary file. It is stored beside the Cookie
   in the per-user config directory; on POSIX its mode is set to `0600`.
+- `.auth_state.lock` contains no credentials. It only prevents concurrent
+  `bili-dl` processes from interleaving Cookie and refresh-state updates and
+  is also Git-ignored.
 
 ## Windows: Controlled Folder Access
 

@@ -363,6 +363,29 @@ def test_store_qr_session_state_write_failure_removes_stale_state(
     assert any("自动续期不可用" in text for _, text in result.messages)
 
 
+def test_store_qr_session_refuses_a_concurrent_state_update(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(store, "AUTH_LOCK_TIMEOUT", 0)
+
+    with store._auth_lock(tmp_path):
+        result = store.store_qr_session([], "token", tmp_path)
+
+    assert result.success is False
+    assert any("正在进行" in text for _, text in result.messages)
+
+
+def test_renew_if_due_skips_when_another_process_holds_the_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(store, "AUTH_LOCK_TIMEOUT", 0)
+
+    with store._auth_lock(tmp_path):
+        messages = store._renew_if_due(tmp_path)
+
+    assert any("跳过自动续期" in text for _, text in messages)
+
+
 def test_renewal_state_rejects_token_from_another_cookie_session(tmp_path: Path) -> None:
     from bili_dl import authstate
 

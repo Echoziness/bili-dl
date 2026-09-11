@@ -26,8 +26,9 @@ classifiers = [
     "Topic :: Utilities",
 ]
 dependencies = [
-    "qrcode>=8",
     "cryptography>=45",
+    "filelock>=3.16",
+    "qrcode>=8",
 ]
 
 [project.scripts]
