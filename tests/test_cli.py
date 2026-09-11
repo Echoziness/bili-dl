@@ -76,6 +76,10 @@ def test_login_parser_cookie_dir() -> None:
     assert args.cookie_dir == Path("/tmp/cookies")
 
 
+def test_status_flag() -> None:
+    assert _parse("--status").status is True
+
+
 # ─── main() with mocked dependencies ────────────────────────────────────────
 
 
@@ -127,6 +131,38 @@ def test_login_does_not_require_ytdlp(monkeypatch: pytest.MonkeyPatch, tmp_path:
     monkeypatch.setattr(downloader, "find_ytdlp", lambda: None)
 
     assert cli.main(["login", "--cookie-dir", str(tmp_path)]) == 0
+
+
+def test_status_does_not_require_downloader_or_trigger_renewal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Status is observational: no downloader check or renewal side effect."""
+    from bili_dl import authstate, cookiestore
+
+    monkeypatch.setattr(
+        cookiestore,
+        "validate",
+        lambda cookie_dir: cookiestore.ValidationResult(True, uname="alice"),
+    )
+    monkeypatch.setattr(
+        authstate,
+        "load",
+        lambda cookie_dir: (authstate.AuthState("token", "2026-09-11"), None),
+    )
+    monkeypatch.setattr(downloader, "find_ytdlp", lambda: None)
+
+    assert cli.main(["--status"]) == 0
+
+
+def test_status_invalid_cookie_returns_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    from bili_dl import authstate, cookiestore
+
+    monkeypatch.setattr(
+        cookiestore, "validate", lambda cookie_dir: cookiestore.ValidationResult(False)
+    )
+    monkeypatch.setattr(authstate, "load", lambda cookie_dir: (None, None))
+
+    assert cli.main(["--status"]) == 1
 
 
 def test_main_non_interactive_failure(monkeypatch: pytest.MonkeyPatch) -> None:

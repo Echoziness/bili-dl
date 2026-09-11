@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from . import __version__, authqr, cookiestore, downloader, settings, ui
+from . import __version__, authqr, authstate, cookiestore, downloader, settings, ui
 from . import ffmpeg as ff
 from .config import VALID_MODES
 from .downloader import DownloadConfig
@@ -74,6 +74,7 @@ examples:
   bili-dl https://www.bilibili.com/video/BV...     # video + audio (default)
   bili-dl -a https://www.bilibili.com/video/BV...  # audio only (M4A)
   bili-dl --batch-file urls.txt                    # batch download
+  bili-dl --status                                 # inspect login and renewal state
   bili-dl login                                    # QR login (install bili-dl[login])
   bili-dl                                          # interactive REPL
 
@@ -168,6 +169,11 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="FILE",
         help="download URLs listed in a text file (one URL per line, # comments)",
+    )
+    p.add_argument(
+        "--status",
+        action="store_true",
+        help="show Cookie and automatic-renewal status without downloading",
     )
     p.add_argument("url", nargs="?", default=None, help="Bilibili video URL")
     return p
@@ -308,6 +314,29 @@ def _login_command(argv: list[str]) -> int:
     return 0 if stored.success else 1
 
 
+def _status_command(opts: Options) -> int:
+    """Report session readiness without downloading, refreshing, or prompting."""
+    result = cookiestore.validate(opts.cookie_dir)
+    _emit(result.messages)
+    if result.valid and result.uname is not None:
+        ui.ok("[状态] 下载 Cookie: 已通过在线验证")
+    elif result.valid:
+        ui.warn("[状态] 下载 Cookie: 本地格式可用，当前无法在线验证")
+    else:
+        ui.error("[状态] 下载 Cookie: 不可用")
+
+    state, error = authstate.load(opts.cookie_dir)
+    if error:
+        ui.warn(f"[状态] 自动续期: 不可用（{error}）")
+    elif state is None:
+        ui.warn("[状态] 自动续期: 未启用（运行 bili-dl login 可启用）")
+    elif state.last_refresh_check_utc:
+        ui.ok(f"[状态] 自动续期: 已启用 | 最近检查: {state.last_refresh_check_utc} UTC")
+    else:
+        ui.ok("[状态] 自动续期: 已启用 | 尚未执行每日检查")
+    return 0 if result.valid else 1
+
+
 def _run_once(opts: Options, url: str, ytdlp: str, ffmpeg_bin: Optional[str]) -> bool:
     """Execute one download and emit results. Returns success."""
     cfg = DownloadConfig(
@@ -396,6 +425,11 @@ def _main_impl(argv: Optional[list[str]] = None) -> int:
     # Load config file, merge with CLI args + env vars (CLI > env > config) --
     cfg = _load_settings(args.config)
     opts = _merge_settings(args, cfg)
+
+    if args.status:
+        if args.url or args.batch_file:
+            parser.error("--status cannot be combined with a URL or --batch-file")
+        return _status_command(opts)
 
     # Dependency checks (same severity ladder as bd.ps1) ---------------------
     ytdlp = downloader.find_ytdlp()

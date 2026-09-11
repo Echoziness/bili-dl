@@ -123,6 +123,7 @@ bili-dl https://www.bilibili.com/video/BV...   # one-shot (video + audio)
 bili-dl -a https://www.bilibili.com/video/BV...  # audio only
 bili-dl -v https://www.bilibili.com/video/BV...  # video only
 bili-dl --batch-file urls.txt                  # batch: download all URLs in file
+bili-dl --status                               # inspect login / renewal status
 ```
 
 | OS | Videos | Audio |
@@ -176,6 +177,7 @@ bili-dl --batch-file urls.txt
 | `--no-color` | disable colored output (also: `NO_COLOR` env var) |
 | `--config FILE` | override config file path |
 | `--batch-file FILE` | download URLs listed in a text file |
+| `--status` | inspect Cookie and automatic-renewal status without downloading |
 | `-V`, `--version` | show version |
 | `-h`, `--help` | show help |
 
