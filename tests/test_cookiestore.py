@@ -24,7 +24,11 @@ def _make_cookie_dir(tmp_path: Path) -> Path:
     """Create a cookie dir with a valid SESSDATA file for validate tests."""
     out = store.bili_cookie_path(tmp_path)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(".bilibili.com\tTRUE\t/\tFALSE\t0\tSESSDATA\tabc%2C123\n", encoding="utf-8")
+    out.write_text(
+        ".bilibili.com\tTRUE\t/\tFALSE\t0\tSESSDATA\tabc%2C123\n"
+        ".bilibili.com\tTRUE\t/\tFALSE\t0\tbili_jct\tcsrf\n",
+        encoding="utf-8",
+    )
     return tmp_path
 
 
@@ -260,7 +264,10 @@ def test_store_qr_session_saves_refresh_token_after_cookie_validation(
     saved: list[authstate.AuthState] = []
     monkeypatch.setattr(authstate, "save", lambda state, cookie_dir: saved.append(state) or None)
 
-    lines = [".bilibili.com\tTRUE\t/\tTRUE\t0\tSESSDATA\tsession"]
+    lines = [
+        ".bilibili.com\tTRUE\t/\tTRUE\t0\tSESSDATA\tsession",
+        ".bilibili.com\tTRUE\t/\tTRUE\t0\tbili_jct\tcsrf",
+    ]
     result = store.store_qr_session(lines, "refresh-token", tmp_path)
 
     assert result.success is True
@@ -291,6 +298,44 @@ def test_store_qr_session_without_token_removes_stale_state(
     assert any("未返回续期凭证" in text for _, text in result.messages)
 
 
+def test_store_qr_session_without_csrf_does_not_enable_renewal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from bili_dl import authstate
+
+    authstate.path(tmp_path).write_text("stale", encoding="utf-8")
+    monkeypatch.setattr(
+        store,
+        "store_qr_cookie",
+        lambda lines, cookie_dir: store.QrStoreResult(True, [("ok", "stored")]),
+    )
+
+    result = store.store_qr_session(
+        [".bilibili.com\tTRUE\t/\tTRUE\t0\tSESSDATA\tnew-session"],
+        "refresh-token",
+        tmp_path,
+    )
+
+    assert result.success is True
+    assert not authstate.path(tmp_path).exists()
+    assert any("缺少 bili_jct" in text for _, text in result.messages)
+
+
+def test_renewal_state_requires_csrf_for_the_bound_session(tmp_path: Path) -> None:
+    from bili_dl import authstate
+
+    lines = [".bilibili.com\tTRUE\t/\tTRUE\t0\tSESSDATA\tsession"]
+    store.bili_cookie_path(tmp_path).write_text("\n".join(lines) + "\n", encoding="utf-8")
+    fingerprint = store._session_fingerprint(lines)
+    assert fingerprint is not None
+    assert authstate.save(authstate.AuthState("token", fingerprint), tmp_path) is None
+
+    state, error = store.renewal_state(tmp_path)
+
+    assert state is None
+    assert error == "当前 Cookie 缺少 bili_jct，无法自动续期"
+
+
 def test_store_qr_session_state_write_failure_removes_stale_state(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -305,7 +350,10 @@ def test_store_qr_session_state_write_failure_removes_stale_state(
     monkeypatch.setattr(authstate, "save", lambda state, cookie_dir: "无法保存刷新凭证状态")
 
     result = store.store_qr_session(
-        [".bilibili.com\tTRUE\t/\tTRUE\t0\tSESSDATA\tnew-session"],
+        [
+            ".bilibili.com\tTRUE\t/\tTRUE\t0\tSESSDATA\tnew-session",
+            ".bilibili.com\tTRUE\t/\tTRUE\t0\tbili_jct\tcsrf",
+        ],
         "new-token",
         tmp_path,
     )

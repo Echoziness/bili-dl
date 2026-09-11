@@ -61,26 +61,24 @@ def bili_cookie_path(cookie_dir: Optional[Path] = None) -> Path:
     return (cookie_dir or config_dir()) / BILI_COOKIE_FILENAME
 
 
-def _extract_sessdata(lines: list[str]) -> Optional[str]:
-    """Return the SESSDATA value from the first matching bilibili.com line.
+def _extract_cookie_value(lines: list[str], name: str) -> Optional[str]:
+    """Return a named Cookie value from the first matching bilibili.com line.
 
-    Matches by Netscape column 6 (name == "SESSDATA") rather than a substring
-    test on the whole line — a value containing ``"SESSDATA"`` would otherwise
-    falsely match. Domain column must contain ``bilibili.com``.
+    Matches by Netscape column 6 rather than a substring test on the whole
+    line. Domain column must contain ``bilibili.com``.
     """
     for raw_line in lines:
         line = raw_line.removeprefix("#HttpOnly_")
         if line.startswith("#"):
             continue
         fields = line.split("\t")
-        if (
-            len(fields) >= 7
-            and "bilibili.com" in fields[0]
-            and fields[5] == "SESSDATA"
-            and fields[6]
-        ):
+        if len(fields) >= 7 and "bilibili.com" in fields[0] and fields[5] == name and fields[6]:
             return fields[6]
     return None
+
+
+def _extract_sessdata(lines: list[str]) -> Optional[str]:
+    return _extract_cookie_value(lines, "SESSDATA")
 
 
 def _session_fingerprint(lines: list[str]) -> Optional[str]:
@@ -107,6 +105,8 @@ def renewal_state(
         return None, "当前 Cookie 缺少可识别的会话信息"
     if fingerprint != state.session_fingerprint:
         return None, "刷新凭证不属于当前 Cookie 会话，请重新运行 bili-dl login"
+    if _extract_cookie_value(read_lines(bili_cookie_path(cookie_dir)), "bili_jct") is None:
+        return None, "当前 Cookie 缺少 bili_jct，无法自动续期"
     return state, None
 
 
@@ -270,6 +270,12 @@ def store_qr_session(
     if not refresh_token:
         error = authstate.remove(cookie_dir)
         result.messages.append(("warn", "[登录] B 站未返回续期凭证，需在会话失效后重新扫码"))
+        if error:
+            result.messages.append(("warn", f"[登录] {error}"))
+        return result
+    if _extract_cookie_value(cookie_lines, "bili_jct") is None:
+        error = authstate.remove(cookie_dir)
+        result.messages.append(("warn", "[登录] 新会话缺少 bili_jct，自动续期未启用"))
         if error:
             result.messages.append(("warn", f"[登录] {error}"))
         return result
