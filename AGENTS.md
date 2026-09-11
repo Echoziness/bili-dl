@@ -149,7 +149,7 @@
 
 ### 2.21 审查优化与覆盖率守门（v0.2.7）
 - **背景**：审查发现覆盖率脱节（实测 63% vs 文档 §2.16 写 87%）+ CI 无 fail-under 闸门 + 5 个轻微问题。本轮做系统优化。
-- **覆盖率**：当时从 63% 提升到 **98%**（107→159 测试）。CI `coverage report --fail-under=70` 设闸门，覆盖率下滑会让 CI 变红。2026-09 新增扫码/续期协议后的实测整体覆盖率为 **93%**（188 测试）；新增网络协议的异常分支以 mock 覆盖关键事务，不应把历史 98% 当作当前数字。
+- **覆盖率**：当时从 63% 提升到 **98%**（107→159 测试）。CI `coverage report --fail-under=70` 设闸门，覆盖率下滑会让 CI 变红。2026-09 新增扫码/续期协议后的实测整体覆盖率为 **85%**（203 测试）；新增网络协议的异常分支以 mock 覆盖关键事务，不应把历史 98% 当作当前数字。
 - **轻微问题修复**：
   - 代理环境变量认大小写（`HTTPS_PROXY`/`https_proxy`/`HTTP_PROXY`/`http_proxy`），符合 curl/git/requests 惯例。Windows 环境变量本身大小写不敏感，Linux/macOS 区分（故大小写优先级测试无法在 Windows 跑，仅测小写被识别）。
   - `settings.load` 对 `insecure` 做 `isinstance(bool)` 校验，非 bool 值（如 `"yes"`、`1`）coerce 为 `None`，防止下游 `cfg.insecure or False` 拾取 truthy 字符串。
@@ -198,7 +198,7 @@
 - **边界**：`bili-dl login` 建立独立 B 站 Web 会话，不读取浏览器 Profile/Cookie、不假设任何浏览器存在。只有显式 login 才展示二维码；下载、批处理与 REPL 绝不隐式等待扫码。
 - **可观测性**：`bili-dl --status` 是只读状态入口，不要求 yt-dlp/ffmpeg，不下载、不续期、不扫码；它显示已登录账号、B 站此刻是否要求续期、自动续期是否已启用。它不显示无法预测的"下次续期时间"或实现内部的节流日期。
 - **状态**：QR poll 成功的完整 B 站 Cookie 先经 `nav` 验证再原子写 `cookies_bilibili.txt`；返回的 `refresh_token` 与当前 `SESSDATA` 的单向 SHA-256 指纹共同写入同目录 `auth_state.json`（POSIX `0600`，两者及临时文件均须 Git 忽略）。每次续期前必须先验证指纹匹配，严禁把旧 token 用于替换或导入后的另一份 Cookie。状态写盘失败不得掩盖“Cookie 已可下载”的事实，但必须清除旧状态并警告自动续期不可用。
-- **续期语义**：不是"永久登录"。只在 Cookie 已通过 nav 校验后、每 UTC 日首次下载前查询 `cookie/info`；B 站要求刷新才走 `correspond → refresh → confirm`。新 Cookie 必须 nav 验证并持久化新 token 后才确认旧 token；网络或协议失败保留当前有效 Cookie 并继续下载。会话已被 B 站撤销时只提示用户显式重跑 login。
+- **续期语义**：不是"永久登录"。只在 Cookie 已通过 nav 校验后、每 UTC 日首次下载前查询 `cookie/info`；B 站要求刷新才走 `correspond → refresh → confirm`。新 Cookie 必须 nav 验证并将新 token 与待确认的旧 token 一并持久化，之后才向 B 站确认旧 token；确认失败时保留待确认状态并在后续下载前重试，不得静默遗忘。网络或协议失败保留当前有效 Cookie 并继续下载。会话已被 B 站撤销时只提示用户显式重跑 login。
 - **依赖**：二维码和 RSA-OAEP 是产品的标准能力，`qrcode`、`cryptography` 随正常安装提供；不得手写密码学或将二维码 URL/凭证发往第三方服务。
 
 ## 3. 项目结构

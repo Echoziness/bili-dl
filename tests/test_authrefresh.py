@@ -129,3 +129,20 @@ def test_confirm_uses_the_new_cookie_jar(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(authrefresh, "_request_json", lambda opener, request: ({"code": 0}, None))
 
     assert authrefresh.confirm(result) is None
+
+
+def test_confirm_pending_loads_the_current_cookie_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cookie_path = tmp_path / "cookies.txt"
+    jar = _jar()
+    monkeypatch.setattr(authrefresh, "_load_jar", lambda path: (jar, None))
+    captured: list[tuple[http.cookiejar.CookieJar, str]] = []
+    monkeypatch.setattr(
+        authrefresh,
+        "_confirm",
+        lambda opener, loaded_jar, token: captured.append((loaded_jar, token)) or None,
+    )
+
+    assert authrefresh.confirm_pending(cookie_path, "old-token") is None
+    assert captured == [(jar, "old-token")]

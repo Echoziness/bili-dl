@@ -74,9 +74,10 @@ and a one-way fingerprint of its Cookie session in a separate, Git-ignored
 most once per UTC day whether Bilibili asks to renew the Web session. If
 renewal is requested, the new Cookie is verified and saved before the old
 refresh credential is confirmed as spent. A stale credential is never used
-after a Cookie is replaced or manually imported. This check never opens a QR
-prompt; a transient renewal error leaves a currently valid Cookie usable and
-reports a warning instead.
+after a Cookie is replaced or manually imported. If confirmation is
+temporarily unreachable, it is recorded and retried before a later renewal
+check. This check never opens a QR prompt; a transient renewal error leaves a
+currently valid Cookie usable and reports a warning instead.
 
 This is **not** a promise of permanent login. Bilibili can still invalidate a
 session for expiry, account security, or risk control. In that case, run
@@ -186,10 +187,11 @@ bili-dl --batch-file urls.txt
 - Browser-imported cookies are backed up before replacement. QR-login cookies
   replace the destination atomically, but only after an online Bilibili
   session check succeeds; a failed check leaves the prior file untouched.
-- `auth_state.json` contains a Bilibili refresh credential and a one-way
-  Cookie-session fingerprint. It is therefore Git-ignored along with its
-  atomic-write temporary file. It is stored beside the Cookie in the per-user
-  config directory; on POSIX its mode is set to `0600`.
+- `auth_state.json` contains Bilibili refresh credentials and a one-way
+  Cookie-session fingerprint, including an old credential temporarily kept
+  only when server confirmation must be retried. It is therefore Git-ignored
+  along with its atomic-write temporary file. It is stored beside the Cookie
+  in the per-user config directory; on POSIX its mode is set to `0600`.
 
 ## Windows: Controlled Folder Access
 

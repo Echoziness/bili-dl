@@ -344,6 +344,8 @@ def _status_command(opts: Options) -> int:
         ui.warn(f"[状态] 自动续期: 不可用（{state_error}）")
     elif state is None:
         ui.warn("[状态] 自动续期: 未启用（运行 bili-dl login 可启用）")
+    elif state.pending_confirm_token is not None:
+        ui.warn("[状态] 自动续期: 已启用（下次下载将完成上次续期确认）")
     else:
         ui.ok("[状态] 自动续期: 已启用")
     return 0 if result.valid else 1

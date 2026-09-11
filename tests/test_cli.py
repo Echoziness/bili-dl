@@ -189,6 +189,29 @@ def test_status_does_not_promise_renewal_without_matching_state(
     assert "下次下载会自动处理" not in output
 
 
+def test_status_reports_pending_confirmation_without_retrying_it(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.Capture
+) -> None:
+    from bili_dl import authrefresh, authstate, cookiestore
+
+    state = authstate.AuthState("new", "fingerprint", "2026-09-11", pending_confirm_token="old")
+    monkeypatch.setattr(
+        cookiestore,
+        "validate",
+        lambda cookie_dir: cookiestore.ValidationResult(True, uname="alice"),
+    )
+    monkeypatch.setattr(cookiestore, "renewal_state", lambda cookie_dir: (state, None))
+    monkeypatch.setattr(authrefresh, "check_requirement", lambda cookie_path: (False, None))
+    monkeypatch.setattr(
+        authrefresh,
+        "confirm_pending",
+        lambda path, token: pytest.fail("status must remain read-only"),
+    )
+
+    assert cli.main(["--status"]) == 0
+    assert "下次下载将完成上次续期确认" in capsys.readouterr().err
+
+
 def test_main_non_interactive_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(downloader, "find_ytdlp", lambda: "yt-dlp")
     monkeypatch.setattr(ff, "find_ffmpeg", lambda: "ffmpeg")

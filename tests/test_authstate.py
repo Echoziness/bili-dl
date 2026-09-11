@@ -8,7 +8,9 @@ from bili_dl import authstate
 
 
 def test_save_then_load_state(tmp_path: Path) -> None:
-    state = authstate.AuthState("refresh-secret", "session-fingerprint", "2026-09-11")
+    state = authstate.AuthState(
+        "refresh-secret", "session-fingerprint", "2026-09-11", "old-refresh-secret"
+    )
 
     assert authstate.save(state, tmp_path) is None
     loaded, error = authstate.load(tmp_path)

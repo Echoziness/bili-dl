@@ -294,11 +294,28 @@ def _renew_if_due(cookie_dir: Optional[Path]) -> list[tuple[str, str]]:
     state, error = renewal_state(cookie_dir)
     if error:
         return [("warn", f"[登录] 自动续期不可用：{error}")]
-    if state is None or state.last_refresh_check_utc == _utc_today():
+    if state is None:
         return []
 
-    renewal = authrefresh.check_and_refresh(bili_cookie_path(cookie_dir), state.refresh_token)
-    messages = list(renewal.messages)
+    cookie_path = bili_cookie_path(cookie_dir)
+    messages: list[tuple[str, str]] = []
+    if state.pending_confirm_token is not None:
+        error = authrefresh.confirm_pending(cookie_path, state.pending_confirm_token)
+        if error:
+            return [("warn", f"[登录] 无法完成上次会话续期确认：{error}")]
+        state = authstate.AuthState(
+            state.refresh_token, state.session_fingerprint, state.last_refresh_check_utc
+        )
+        error = authstate.save(state, cookie_dir)
+        if error:
+            return [("warn", f"[登录] 已确认上次会话续期，但无法更新本地状态：{error}")]
+        messages.append(("info", "[登录] 已完成上次会话续期确认"))
+
+    if state.last_refresh_check_utc == _utc_today():
+        return messages
+
+    renewal = authrefresh.check_and_refresh(cookie_path, state.refresh_token)
+    messages.extend(renewal.messages)
     if not renewal.checked:
         return messages
     if not renewal.refreshed:
@@ -321,7 +338,13 @@ def _renew_if_due(cookie_dir: Optional[Path]) -> list[tuple[str, str]]:
         messages.append(("warn", "[登录] 新会话无法绑定续期凭证，自动续期不可用"))
         return messages
     error = authstate.save(
-        authstate.AuthState(renewal.refresh_token, fingerprint, _utc_today()), cookie_dir
+        authstate.AuthState(
+            renewal.refresh_token,
+            fingerprint,
+            _utc_today(),
+            pending_confirm_token=renewal.old_refresh_token,
+        ),
+        cookie_dir,
     )
     if error:
         clear_error = authstate.remove(cookie_dir)
@@ -332,6 +355,12 @@ def _renew_if_due(cookie_dir: Optional[Path]) -> list[tuple[str, str]]:
     error = authrefresh.confirm(renewal)
     if error:
         messages.append(("warn", f"[登录] 新会话已保存，但无法确认旧续期凭证：{error}"))
+        return messages
+    error = authstate.save(
+        authstate.AuthState(renewal.refresh_token, fingerprint, _utc_today()), cookie_dir
+    )
+    if error:
+        messages.append(("warn", f"[登录] 续期已确认，但无法清除待确认状态：{error}"))
     return messages
 
 

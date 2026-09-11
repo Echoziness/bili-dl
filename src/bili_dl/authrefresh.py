@@ -297,6 +297,23 @@ def check_and_refresh(cookie_path: Path, refresh_token: str) -> RenewalResult:
     )
 
 
+def _confirm(
+    opener: urllib.request.OpenerDirector,
+    jar: http.cookiejar.CookieJar,
+    old_refresh_token: str,
+) -> Optional[str]:
+    csrf = _cookie_value(jar, "bili_jct")
+    if not csrf:
+        return "刷新后的会话缺少 bili_jct"
+    form = urllib.parse.urlencode({"csrf": csrf, "refresh_token": old_refresh_token}).encode()
+    payload, error = _request_json(opener, _request(COOKIE_CONFIRM_REFRESH_API, form))
+    if payload is None:
+        return error
+    if payload.get("code") != 0:
+        return str(payload.get("message") or "B 站拒绝确认会话续期")
+    return None
+
+
 def confirm(result: RenewalResult) -> Optional[str]:
     """Confirm a durably saved refresh, retiring the old refresh credential."""
     if (
@@ -306,15 +323,13 @@ def confirm(result: RenewalResult) -> Optional[str]:
         or result.old_refresh_token is None
     ):
         return "会话续期确认缺少上下文"
-    csrf = _cookie_value(result.jar, "bili_jct")
-    if not csrf:
-        return "刷新后的会话缺少 bili_jct"
-    form = urllib.parse.urlencode(
-        {"csrf": csrf, "refresh_token": result.old_refresh_token}
-    ).encode()
-    payload, error = _request_json(result.opener, _request(COOKIE_CONFIRM_REFRESH_API, form))
-    if payload is None:
+    return _confirm(result.opener, result.jar, result.old_refresh_token)
+
+
+def confirm_pending(cookie_path: Path, old_refresh_token: str) -> Optional[str]:
+    """Retry a previously persisted old-token confirmation."""
+    jar, error = _load_jar(cookie_path)
+    if jar is None:
         return error
-    if payload.get("code") != 0:
-        return str(payload.get("message") or "B 站拒绝确认会话续期")
-    return None
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+    return _confirm(opener, jar, old_refresh_token)

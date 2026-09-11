@@ -3,9 +3,11 @@
 The refresh token is deliberately kept out of ``config.toml``: it is a
 credential, not a user preference.  A one-way SESSDATA fingerprint binds it
 to the Cookie session it can refresh, preventing an old token from being used
-after Cookie replacement.  The state lives beside the already sensitive
-``cookies_bilibili.txt`` file, is written atomically, and gets mode ``0600``
-on POSIX.  On Windows the default AppData directory is already per-user.
+after Cookie replacement.  An old token awaiting server confirmation also
+stays here so a transient failure can be retried.  The state lives beside the
+already sensitive ``cookies_bilibili.txt`` file, is written atomically, and
+gets mode ``0600`` on POSIX.  On Windows the default AppData directory is
+already per-user.
 """
 
 from __future__ import annotations
@@ -29,6 +31,7 @@ class AuthState:
     refresh_token: str
     session_fingerprint: str
     last_refresh_check_utc: Optional[str] = None
+    pending_confirm_token: Optional[str] = None
 
 
 def path(cookie_dir: Optional[Path] = None) -> Path:
@@ -58,7 +61,12 @@ def load(cookie_dir: Optional[Path] = None) -> tuple[Optional[AuthState], Option
     last_check = raw.get("last_refresh_check_utc")
     if last_check is not None and not isinstance(last_check, str):
         return None, "刷新凭证状态文件格式无效"
-    return AuthState(token, fingerprint, last_check), None
+    pending_confirm = raw.get("pending_confirm_token")
+    if pending_confirm is not None and (
+        not isinstance(pending_confirm, str) or not pending_confirm
+    ):
+        return None, "刷新凭证状态文件格式无效"
+    return AuthState(token, fingerprint, last_check, pending_confirm), None
 
 
 def save(state: AuthState, cookie_dir: Optional[Path] = None) -> Optional[str]:

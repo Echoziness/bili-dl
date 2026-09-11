@@ -403,15 +403,84 @@ def test_renew_if_due_persists_new_session_before_confirming_old_token(
 
     result = store._renew_if_due(tmp_path)
 
-    assert saved == [
-        authstate.AuthState(
-            "new",
-            store._session_fingerprint(renewal.cookie_lines) or "",
-            "2026-09-11",
-        )
-    ]
+    expected_pending = authstate.AuthState(
+        "new",
+        store._session_fingerprint(renewal.cookie_lines) or "",
+        "2026-09-11",
+        pending_confirm_token="old",
+    )
+    expected_complete = authstate.AuthState(
+        "new",
+        store._session_fingerprint(renewal.cookie_lines) or "",
+        "2026-09-11",
+    )
+    assert saved == [expected_pending, expected_complete]
     assert confirmed == [True]
     assert ("ok", "new-cookie") in result
+
+
+def test_renew_if_due_keeps_pending_confirmation_after_network_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from bili_dl import authrefresh, authstate
+
+    monkeypatch.setattr(store, "_utc_today", lambda: "2026-09-11")
+    monkeypatch.setattr(
+        store,
+        "renewal_state",
+        lambda cookie_dir: (authstate.AuthState("old", "old-fingerprint"), None),
+    )
+    renewal = authrefresh.RenewalResult(
+        checked=True,
+        refreshed=True,
+        cookie_lines=[".bilibili.com\tTRUE\t/\tTRUE\t0\tSESSDATA\tnew"],
+        refresh_token="new",
+        old_refresh_token="old",
+    )
+    monkeypatch.setattr(authrefresh, "check_and_refresh", lambda path, token: renewal)
+    monkeypatch.setattr(
+        store,
+        "_store_verified_cookie",
+        lambda lines, cookie_dir, message: store.QrStoreResult(True),
+    )
+    saved: list[authstate.AuthState] = []
+    monkeypatch.setattr(authstate, "save", lambda state, cookie_dir: saved.append(state) or None)
+    monkeypatch.setattr(authrefresh, "confirm", lambda result: "网络连接失败")
+
+    messages = store._renew_if_due(tmp_path)
+
+    assert len(saved) == 1
+    assert saved[0].pending_confirm_token == "old"
+    assert any("无法确认旧续期凭证" in text for _, text in messages)
+
+
+def test_renew_if_due_retries_persisted_confirmation_before_daily_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from bili_dl import authrefresh, authstate
+
+    state = authstate.AuthState("new", "fingerprint", "2026-09-11", pending_confirm_token="old")
+    monkeypatch.setattr(store, "_utc_today", lambda: "2026-09-11")
+    monkeypatch.setattr(store, "renewal_state", lambda cookie_dir: (state, None))
+    confirmed: list[str] = []
+    monkeypatch.setattr(
+        authrefresh,
+        "confirm_pending",
+        lambda path, token: confirmed.append(token) or None,
+    )
+    saved: list[authstate.AuthState] = []
+    monkeypatch.setattr(authstate, "save", lambda value, cookie_dir: saved.append(value) or None)
+    monkeypatch.setattr(
+        authrefresh,
+        "check_and_refresh",
+        lambda path, token: pytest.fail("daily check must stay throttled"),
+    )
+
+    messages = store._renew_if_due(tmp_path)
+
+    assert confirmed == ["old"]
+    assert saved == [authstate.AuthState("new", "fingerprint", "2026-09-11")]
+    assert any("已完成上次会话续期确认" in text for _, text in messages)
 
 
 # ─── ensure_cookie: orchestration branches ───────────────────────────────────

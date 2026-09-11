@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Renewal state is bound to its Cookie session with a one-way SESSDATA
   fingerprint. Re-login, manual Cookie imports, and partial write failures can
   no longer make the tool send an old refresh token with a different session.
+- If confirming the old refresh token fails after a successful refresh, the
+  pending confirmation is kept in `auth_state.json` and retried before a later
+  daily renewal check instead of being silently forgotten.
 - A failed renewal check never interrupts a currently valid download session
   or triggers an implicit QR prompt. Bilibili can still expire or revoke a
   session, in which case the user explicitly runs `bili-dl login` again.
@@ -40,7 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added protocol and transaction coverage for QR refresh-token receipt,
   refresh-state atomic storage, daily no-refresh checks, staged Cookie
   replacement, session-binding rejection, and old-token confirmation
-  (199 tests; total coverage 84%).
+  (203 tests; total coverage 85%).
 
 ## [0.3.0] - 2026-08-14
 
