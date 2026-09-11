@@ -5,5 +5,5 @@ Public API entry point is :func:`bili_dl.cli.main`.
 
 from __future__ import annotations
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 __all__ = ["__version__"]
