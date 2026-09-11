@@ -180,7 +180,7 @@ def _correspond_path(timestamp: int) -> tuple[Optional[str], Optional[str]]:
         from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
         from cryptography.hazmat.primitives.serialization import load_pem_public_key
     except ImportError:
-        return None, '未安装会话续期组件（运行: pip install "bili-dl[login]"）'
+        return None, "未安装会话续期组件（请重新安装: pip install -U bili-dl）"
     try:
         public_key = load_pem_public_key(_PUBLIC_KEY_PEM)
         if not isinstance(public_key, RSAPublicKey):

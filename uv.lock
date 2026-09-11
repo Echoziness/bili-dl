@@ -73,9 +73,7 @@ wheels = [
 [[package]]
 name = "bili-dl"
 source = { editable = "." }
-
-[package.optional-dependencies]
-login = [
+dependencies = [
     { name = "cryptography" },
     { name = "qrcode" },
 ]
@@ -90,10 +88,9 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "cryptography", marker = "extra == 'login'", specifier = ">=45" },
-    { name = "qrcode", marker = "extra == 'login'", specifier = ">=8" },
+    { name = "cryptography", specifier = ">=45" },
+    { name = "qrcode", specifier = ">=8" },
 ]
-provides-extras = ["login"]
 
 [package.metadata.requires-dev]
 dev = [

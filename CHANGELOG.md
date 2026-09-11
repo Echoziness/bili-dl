@@ -12,9 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `bili-dl login` opens an isolated Bilibili Web QR-login session. It never
   reads a browser profile or browser cookies, and does not require a specific
   browser to exist on the user's machine.
-- QR rendering and the audited RSA-OAEP implementation are optional
-  `bili-dl[login]` dependencies (`qrcode`, `cryptography`); normal downloading
-  retains its zero-runtime-dependency installation.
+- QR rendering and the audited RSA-OAEP implementation (`qrcode`,
+  `cryptography`) are bundled runtime dependencies. Login and renewal work
+  after the normal installation; users do not need to choose or install an
+  extra feature package.
 - The received Bilibili-only cookie set is checked with `nav` before an
   atomic replacement of `cookies_bilibili.txt`; a failed or unreachable check
   leaves any existing cookie file untouched.

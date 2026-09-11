@@ -4,8 +4,8 @@ Single responsibility: read a ``config.toml`` file and return a
 :class:`Settings` object. Pure logic — no ``ui.*`` calls.
 
 TOML is used because it is the Python ecosystem standard (PEP 518/621)
-and ``tomllib`` is stdlib since Python 3.11, preserving the zero-dependency
-constraint.
+and ``tomllib`` is stdlib since Python 3.11, keeping configuration loading
+simple and dependency-free.
 
 Config file schema (all fields optional)::
 

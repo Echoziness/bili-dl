@@ -199,7 +199,7 @@
 - **可观测性**：`bili-dl --status` 是只读状态入口，不要求 yt-dlp/ffmpeg，不下载、不续期、不扫码；它显示已登录账号、B 站此刻是否要求续期、自动续期是否已启用。它不显示无法预测的"下次续期时间"或实现内部的节流日期。
 - **状态**：QR poll 成功的完整 B 站 Cookie 先经 `nav` 验证再原子写 `cookies_bilibili.txt`；返回的 `refresh_token` 单独写同目录 `auth_state.json`（POSIX `0600`，两者及临时文件均须 Git 忽略）。状态写盘失败不得掩盖“Cookie 已可下载”的事实，必须警告自动续期不可用。
 - **续期语义**：不是"永久登录"。只在 Cookie 已通过 nav 校验后、每 UTC 日首次下载前查询 `cookie/info`；B 站要求刷新才走 `correspond → refresh → confirm`。新 Cookie 必须 nav 验证并持久化新 token 后才确认旧 token；网络或协议失败保留当前有效 Cookie 并继续下载。会话已被 B 站撤销时只提示用户显式重跑 login。
-- **依赖**：核心下载仍零运行时依赖；`bili-dl[login]` 为二维码和 RSA-OAEP 带入 `qrcode`、`cryptography`。不得手写密码学或将二维码 URL/凭证发往第三方服务。
+- **依赖**：二维码和 RSA-OAEP 是产品的标准能力，`qrcode`、`cryptography` 随正常安装提供；不得手写密码学或将二维码 URL/凭证发往第三方服务。
 
 ## 3. 项目结构
 
@@ -256,10 +256,10 @@ bili-dl/
 - **`ui` 只被 `cli.py` 依赖**（v0.1.7 起分层架构，逻辑模块不直接调 `ui.*`）。
 - 禁止反向依赖或循环导入。
 
-### 4.2 核心零运行时依赖（硬约束）
-- 基础安装不可引入 `requests`/`colorama`/`rich` 等三方包。HTTP 用 `urllib.request`，彩色输出用 ANSI + `ctypes`，路径用 `pathlib`。
-- `bili-dl[login]` 是明确的窄例外：二维码渲染使用 `qrcode`，RSA-OAEP 使用 `cryptography`，不把它们带入基础下载安装。
-- 任何"加个依赖更方便"的提案都需先权衡基础安装的零依赖卖点。
+### 4.2 依赖保持克制
+- `qrcode`（本地二维码渲染）和 `cryptography`（RSA-OAEP）是登录体验与安全所必需的标准依赖；它们随正常安装提供，不要求用户理解 extra。
+- HTTP 继续使用 `urllib.request`，彩色输出使用 ANSI + `ctypes`；不为便利引入 `requests`、`colorama`、`rich` 等无明确产品收益的依赖。
+- 新依赖必须有清晰的用户价值、安全维护性和移除困难度评估；"零依赖"本身不是目标。
 
 ### 4.3 命名
 - Python 模块用 `snake_case`；CLI 旗帜沿袭 Unix 惯例（`--all/-v/-a` 模式、`--proxy`、`-k/--insecure`、`-V/--version`）。短选项占用清单见 §2.10。
@@ -293,9 +293,9 @@ uv run pytest -q
 bili-dl https://www.bilibili.com/video/BVxxxxx
 bili-dl -a https://www.bilibili.com/video/BVxxxxx   # 验证音频 faststart
 
-# 独立扫码登录 / 只读会话状态（login 额外组件）
-uv run --extra login bili-dl login
-uv run --extra login bili-dl --status
+# 独立扫码登录 / 只读会话状态
+uv run bili-dl login
+uv run bili-dl --status
 
 # ffprobe 检查产物（验证 moov 在前 + isom 容器）
 ffprobe -v error -show_entries format=format_name:format_tags=major_brand,compatible_brands path.m4a

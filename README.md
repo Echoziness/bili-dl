@@ -8,8 +8,8 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 Download Bilibili videos and audio at the best available quality (up to
-1080p for non-premium accounts). Cross-platform, zero runtime dependencies,
-foobar2000-friendly audio output.
+1080p for non-premium accounts). Cross-platform, with built-in QR login,
+automatic session renewal, and foobar2000-friendly audio output.
 
 ## Features
 
@@ -21,8 +21,8 @@ foobar2000-friendly audio output.
 - **foobar2000-friendly audio** — every produced M4A goes through a zero-loss
   `ffmpeg -c copy` remux (`moov`-first + ISOM container). No re-encode, no
   quality loss, instant playback in picky players.
-- **Zero runtime deps** — standard library only. If you have Python, `pipx
-  install bili-dl` is all you need.
+- **Built-in login** — scan with the Bilibili App; no browser-cookie export,
+  browser-profile access, or separate feature installation.
 - **Configurable** — set defaults in a TOML config file (`mode`, `proxy`,
   output dirs, etc.); CLI flags override per-invocation.
 - **Batch download** — download a list of URLs from a text file.
@@ -56,17 +56,9 @@ bili-dl -V                   # verify
 scanning a QR code with the Bilibili App. It does not read your browser
 profile, inspect browser cookies, or require a particular browser.
 
-Install the optional login component, then run:
+After the normal installation, simply run:
 
 ```bash
-pip install "bili-dl[login]"
-bili-dl login
-```
-
-For a `pipx` installation, install the extra at install time:
-
-```bash
-pipx install "bili-dl[login]"
 bili-dl login
 ```
 

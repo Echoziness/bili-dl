@@ -75,7 +75,7 @@ examples:
   bili-dl -a https://www.bilibili.com/video/BV...  # audio only (M4A)
   bili-dl --batch-file urls.txt                    # batch download
   bili-dl --status                                 # inspect login and renewal state
-  bili-dl login                                    # QR login (install bili-dl[login])
+  bili-dl login                                    # QR login
   bili-dl                                          # interactive REPL
 
 report issues: https://github.com/Echoziness/bili-dl/issues\
@@ -281,7 +281,7 @@ def _login_command(argv: list[str]) -> int:
         return 1
     if not authqr.qrcode_available():
         ui.error("[错误] 未安装扫码登录组件")
-        ui.info('请安装: pip install "bili-dl[login]"')
+        ui.info("请重新安装: pip install -U bili-dl")
         return 1
 
     cookie_dir = args.cookie_dir or config_dir()
