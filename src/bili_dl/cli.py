@@ -303,7 +303,7 @@ def _login_command(argv: list[str]) -> int:
     _emit(result.messages)
     if not result.success:
         return 1
-    stored = cookiestore.store_qr_cookie(result.cookie_lines, cookie_dir)
+    stored = cookiestore.store_qr_session(result.cookie_lines, result.refresh_token, cookie_dir)
     _emit(stored.messages)
     return 0 if stored.success else 1
 

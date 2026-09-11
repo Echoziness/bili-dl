@@ -30,7 +30,9 @@ dependencies = []
 [project.optional-dependencies]
 # Kept out of the core package: downloading remains zero-runtime-dependency.
 # The QR renderer is only imported by ``bili-dl login``.
-login = ["qrcode>=8"]
+# QR login and its official Web-session renewal protocol are opt-in.  The
+# core downloader still has no runtime dependencies.
+login = ["qrcode>=8", "cryptography>=45"]
 
 [project.scripts]
 bili-dl = "bili_dl.cli:main"

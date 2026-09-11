@@ -247,6 +247,79 @@ def test_store_qr_cookie_replaces_after_online_validation(
     assert any("qr-user" in text for _, text in result.messages)
 
 
+def test_store_qr_session_saves_refresh_token_after_cookie_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from bili_dl import authstate
+
+    monkeypatch.setattr(
+        store,
+        "store_qr_cookie",
+        lambda lines, cookie_dir: store.QrStoreResult(True, [("ok", "stored")]),
+    )
+    saved: list[authstate.AuthState] = []
+    monkeypatch.setattr(authstate, "save", lambda state, cookie_dir: saved.append(state) or None)
+
+    result = store.store_qr_session(["cookie"], "refresh-token", tmp_path)
+
+    assert result.success is True
+    assert saved == [authstate.AuthState("refresh-token")]
+    assert any("每日会话续期" in text for _, text in result.messages)
+
+
+def test_renew_if_due_records_successful_daily_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from bili_dl import authrefresh, authstate
+
+    monkeypatch.setattr(store, "_utc_today", lambda: "2026-09-11")
+    monkeypatch.setattr(authstate, "load", lambda cookie_dir: (authstate.AuthState("token"), None))
+    monkeypatch.setattr(
+        authrefresh,
+        "check_and_refresh",
+        lambda path, token: authrefresh.RenewalResult(checked=True),
+    )
+    saved: list[authstate.AuthState] = []
+    monkeypatch.setattr(authstate, "save", lambda state, cookie_dir: saved.append(state) or None)
+
+    assert store._renew_if_due(tmp_path) == []
+    assert saved == [authstate.AuthState("token", "2026-09-11")]
+
+
+def test_renew_if_due_persists_new_session_before_confirming_old_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from bili_dl import authrefresh, authstate
+
+    monkeypatch.setattr(store, "_utc_today", lambda: "2026-09-11")
+    monkeypatch.setattr(authstate, "load", lambda cookie_dir: (authstate.AuthState("old"), None))
+    renewal = authrefresh.RenewalResult(
+        checked=True,
+        refreshed=True,
+        cookie_lines=[".bilibili.com\tTRUE\t/\tTRUE\t0\tSESSDATA\tnew"],
+        refresh_token="new",
+        old_refresh_token="old",
+    )
+    monkeypatch.setattr(authrefresh, "check_and_refresh", lambda path, token: renewal)
+    monkeypatch.setattr(
+        store,
+        "_store_verified_cookie",
+        lambda lines, cookie_dir, message: store.QrStoreResult(True, [("ok", "new-cookie")]),
+    )
+    saved: list[authstate.AuthState] = []
+    monkeypatch.setattr(authstate, "save", lambda state, cookie_dir: saved.append(state) or None)
+    confirmed = [False]
+    monkeypatch.setattr(
+        authrefresh, "confirm", lambda result: confirmed.__setitem__(0, True) or None
+    )
+
+    result = store._renew_if_due(tmp_path)
+
+    assert saved == [authstate.AuthState("new", "2026-09-11")]
+    assert confirmed == [True]
+    assert ("ok", "new-cookie") in result
+
+
 # ─── ensure_cookie: orchestration branches ───────────────────────────────────
 
 

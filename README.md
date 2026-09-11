@@ -50,13 +50,13 @@ bili-dl -V                   # verify
 
 ### Cookies (one-time)
 
-#### Experimental: scan a QR code (recommended for this test build)
+#### Scan a QR code (recommended)
 
-This test build can create a **separate Bilibili Web login session** by
+`bili-dl` can create a **separate Bilibili Web login session** by
 scanning a QR code with the Bilibili App. It does not read your browser
 profile, inspect browser cookies, or require a particular browser.
 
-Install the small, optional QR-rendering component, then run:
+Install the optional login component, then run:
 
 ```bash
 pip install "bili-dl[login]"
@@ -76,10 +76,18 @@ Bilibili before atomically replacing `cookies_bilibili.txt`; your normal
 download command can then reuse it. `bili-dl login` deliberately does not
 need `yt-dlp` or `ffmpeg`, so it can be tested on its own.
 
-This is only a login feasibility test: it does **not** yet save Bilibili's
-refresh credential or refresh an expired session automatically. Run `bili-dl
-login` again when a session expires. The full version will build on this flow
-only after it has been validated in real use.
+On a successful QR login, `bili-dl` also saves Bilibili's refresh credential
+in a separate, Git-ignored `auth_state.json` next to the cookie file. Before
+a download, it checks at most once per UTC day whether Bilibili asks to renew
+the Web session. If renewal is requested, the new Cookie is verified and
+saved before the old refresh credential is confirmed as spent. This check
+never opens a QR prompt; a transient renewal error leaves a currently valid
+Cookie usable and reports a warning instead.
+
+This is **not** a promise of permanent login. Bilibili can still invalidate a
+session for expiry, account security, or risk control. In that case, run
+`bili-dl login` again. If you logged in with an earlier test build, run it
+once more after upgrading so the refresh credential can be stored.
 
 #### Import an existing browser export
 
@@ -175,13 +183,17 @@ bili-dl --batch-file urls.txt
 
 - Only Bilibili-domain cookie lines are kept; all others are discarded in
   memory — never written to disk or sent anywhere.
-- `bili-dl login` communicates only with Bilibili's login and session-check
-  endpoints; it does not access any browser profile or send data to a third
-  party. Downloads contact the URLs you provide through `yt-dlp`. No
-  telemetry or analytics.
+- `bili-dl login` and its renewal check communicate only with Bilibili's
+  login, session-check, and renewal endpoints; they do not access any browser
+  profile or send data to a third party. Downloads contact the URLs you
+  provide through `yt-dlp`. No telemetry or analytics.
 - Browser-imported cookies are backed up before replacement. QR-login cookies
   replace the destination atomically, but only after an online Bilibili
   session check succeeds; a failed check leaves the prior file untouched.
+- `auth_state.json` contains a Bilibili refresh credential and is therefore
+  Git-ignored along with its atomic-write temporary file. It is stored beside
+  the Cookie in the per-user config directory; on POSIX its mode is set to
+  `0600`.
 
 ## Windows: Controlled Folder Access
 

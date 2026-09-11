@@ -1,9 +1,8 @@
 """Minimal Bilibili Web QR login transport.
 
-This module intentionally proves only one thing: a QR login can create a
-standalone Bilibili Web session without reading a browser profile.  It does
-not retain the Web ``refresh_token`` yet; automatic renewal belongs to the
-next, separately validated iteration.
+This module creates a standalone Bilibili Web session without reading a
+browser profile.  Its caller can persist the Web ``refresh_token`` returned
+with a successful QR login for the separately implemented renewal flow.
 
 The module has no terminal side effects.  It returns structured results and a
 rendered QR string for :mod:`bili_dl.cli` to present.
@@ -55,6 +54,7 @@ class QrPollResult:
 
     success: bool
     cookie_lines: list[str] = field(default_factory=list)
+    refresh_token: Optional[str] = None
     messages: list[tuple[str, str]] = field(default_factory=list)
 
 
@@ -208,8 +208,13 @@ def poll(session: QrSession, *, sleep: bool = True) -> QrPollResult:
                 return QrPollResult(
                     False, messages=[("error", "[登录] 扫码成功，但未收到 SESSDATA")]
                 )
+            refresh_token = payload.get("refresh_token")
+            if not isinstance(refresh_token, str) or not refresh_token:
+                refresh_token = None
             messages = [("ok", "[登录] 已确认，正在验证新的 B 站会话")]
-            return QrPollResult(True, cookie_lines=lines, messages=messages)
+            return QrPollResult(
+                True, cookie_lines=lines, refresh_token=refresh_token, messages=messages
+            )
         if status == 86038:
             return QrPollResult(
                 False, messages=[("warn", "[登录] 二维码已过期，请重新执行 bili-dl login")]

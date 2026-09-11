@@ -7,22 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added — Experimental QR login feasibility test
+### Added — Browser-independent QR login and Web-session renewal
 
 - `bili-dl login` opens an isolated Bilibili Web QR-login session. It never
   reads a browser profile or browser cookies, and does not require a specific
   browser to exist on the user's machine.
-- QR rendering is an optional `bili-dl[login]` extra (`qrcode`); normal
-  downloading retains its zero-runtime-dependency installation.
+- QR rendering and the audited RSA-OAEP implementation are optional
+  `bili-dl[login]` dependencies (`qrcode`, `cryptography`); normal downloading
+  retains its zero-runtime-dependency installation.
 - The received Bilibili-only cookie set is checked with `nav` before an
   atomic replacement of `cookies_bilibili.txt`; a failed or unreachable check
   leaves any existing cookie file untouched.
+- Successful QR login persists the returned refresh credential separately in
+  Git-ignored `auth_state.json`. Before downloading, Bilibili's `cookie/info`
+  endpoint is checked at most once per UTC day. If it requests renewal, the
+  tool follows `correspond → refresh → confirm`, validates the returned Cookie
+  before replacing the old file, then confirms the old refresh credential.
+- A failed renewal check never interrupts a currently valid download session
+  or triggers an implicit QR prompt. Bilibili can still expire or revoke a
+  session, in which case the user explicitly runs `bili-dl login` again.
 
-### Not included yet
+### Tests
 
-- This intentionally does not persist Bilibili's Web refresh credential or
-  attempt automatic session renewal. It exists solely to validate that a
-  browser-independent QR session works in users' real environments.
+- Added protocol and transaction coverage for QR refresh-token receipt,
+  refresh-state atomic storage, daily no-refresh checks, staged Cookie
+  replacement, and old-token confirmation (188 tests; total coverage 93%).
 
 ## [0.3.0] - 2026-08-14
 

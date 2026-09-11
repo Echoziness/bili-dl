@@ -149,7 +149,7 @@
 
 ### 2.21 审查优化与覆盖率守门（v0.2.7）
 - **背景**：审查发现覆盖率脱节（实测 63% vs 文档 §2.16 写 87%）+ CI 无 fail-under 闸门 + 5 个轻微问题。本轮做系统优化。
-- **覆盖率**：从 63% 提升到 **98%**（107→159 测试）。补齐 cli/ui/ffmpeg/cookiesource/cookiestore/downloader/settings/paths 全模块短板分支。CI `coverage report --fail-under=70` 设闸门，覆盖率下滑会让 CI 变红。
+- **覆盖率**：当时从 63% 提升到 **98%**（107→159 测试）。CI `coverage report --fail-under=70` 设闸门，覆盖率下滑会让 CI 变红。2026-09 新增扫码/续期协议后的实测整体覆盖率为 **93%**（188 测试）；新增网络协议的异常分支以 mock 覆盖关键事务，不应把历史 98% 当作当前数字。
 - **轻微问题修复**：
   - 代理环境变量认大小写（`HTTPS_PROXY`/`https_proxy`/`HTTP_PROXY`/`http_proxy`），符合 curl/git/requests 惯例。Windows 环境变量本身大小写不敏感，Linux/macOS 区分（故大小写优先级测试无法在 Windows 跑，仅测小写被识别）。
   - `settings.load` 对 `insecure` 做 `isinstance(bool)` 校验，非 bool 值（如 `"yes"`、`1`）coerce 为 `None`，防止下游 `cfg.insecure or False` 拾取 truthy 字符串。
@@ -194,6 +194,12 @@
   - 测试锚定：`test_ffmpeg.py::test_cfa_enabled_registry_returns_1/0`（mock `sys.modules["winreg"]` 注入假模块——因 `winreg` 是函数内 import，`ff.winreg` 在非 win32 不存在，只能注入 `sys.modules`）；`test_cfa_hint_*`；`test_cli.py::test_main_top_level_exception_wrapped` 断言栈与环境行。
   - **环境陷阱**：venv 只装了 pytest 没有 coverage，`uv run coverage` 会静默落到系统环境（miniforge）的旧 bili-dl 上导致假失败。排障时先 `uv pip install coverage` 再测。venv 里也应补装 ruff/mypy 避免路径错乱。
 
+### 2.25 独立扫码登录与 B 站要求的会话续期（Unreleased）
+- **边界**：`bili-dl login` 建立独立 B 站 Web 会话，不读取浏览器 Profile/Cookie、不假设任何浏览器存在。只有显式 login 才展示二维码；下载、批处理与 REPL 绝不隐式等待扫码。
+- **状态**：QR poll 成功的完整 B 站 Cookie 先经 `nav` 验证再原子写 `cookies_bilibili.txt`；返回的 `refresh_token` 单独写同目录 `auth_state.json`（POSIX `0600`，两者及临时文件均须 Git 忽略）。状态写盘失败不得掩盖“Cookie 已可下载”的事实，必须警告自动续期不可用。
+- **续期语义**：不是"永久登录"。只在 Cookie 已通过 nav 校验后、每 UTC 日首次下载前查询 `cookie/info`；B 站要求刷新才走 `correspond → refresh → confirm`。新 Cookie 必须 nav 验证并持久化新 token 后才确认旧 token；网络或协议失败保留当前有效 Cookie 并继续下载。会话已被 B 站撤销时只提示用户显式重跑 login。
+- **依赖**：核心下载仍零运行时依赖；`bili-dl[login]` 为二维码和 RSA-OAEP 带入 `qrcode`、`cryptography`。不得手写密码学或将二维码 URL/凭证发往第三方服务。
+
 ## 3. 项目结构
 
 ```
@@ -213,6 +219,9 @@ bili-dl/
 │   ├── config.py                  # 纯常量，无可变状态
 │   ├── paths.py                   # 跨平台路径（Win/macOS/Linux）+ config_file_path()
 │   ├── settings.py                # TOML 配置文件加载（tomllib，纯逻辑，无 ui）
+│   ├── authstate.py                # refresh_token 独立状态原子读写（纯逻辑，无 ui）
+│   ├── authqr.py                   # 独立 B 站 Web 扫码登录传输（纯逻辑，无 ui）
+│   ├── authrefresh.py              # B 站 Web Cookie 每日检查/续期协议（纯逻辑，无 ui）
 │   ├── cookiesource.py            # Cookie 源文件检测 + 提取导入（纯逻辑，无 ui）
 │   ├── cookiestore.py             # Cookie 校验 + ensure_cookie 编排（纯逻辑，无 ui）
 │   ├── ffmpeg.py                  # ffprobe/ffmpeg 探测 + 零损失重封装/提取（纯逻辑，无 ui）
@@ -221,6 +230,9 @@ bili-dl/
 ├── tests/
 │   ├── test_cookiesource.py       # 隐私核心测试（其他站点不泄漏）+ 导入逻辑
 │   ├── test_cookiestore.py        # 校验 + ensure_cookie + _nav_probe mock（网络/HTTP/成功）
+│   ├── test_authqr.py              # QR 状态机 + Cookie 域隔离
+│   ├── test_authrefresh.py         # 每日检查/刷新/确认协议 mock
+│   ├── test_authstate.py           # 刷新凭证状态的原子读写
 │   ├── test_downloader.py         # 参数拼装 + download() mock subprocess
 │   ├── test_ffmpeg.py             # repair/extract mock subprocess 全分支
 │   ├── test_cli.py                # argparse parser + config 合并 + 批量下载 + main() mock
@@ -237,15 +249,16 @@ bili-dl/
 ## 4. 关键约定
 
 ### 4.1 依赖方向
-`cli → settings → config`；`cli → cookiestore → cookiesource`；`cli → downloader → ffmpeg`；`cli → paths → config`；`cookiestore/cookiesource/ffmpeg/downloader → config`。
+`cli → settings → config`；`cli → cookiestore → cookiesource/authstate/authrefresh`；`cli → downloader → ffmpeg`；`cli → paths → config`；`cookiestore/cookiesource/ffmpeg/downloader/authrefresh/authstate → config`。
 - `config` 是叶节点（只导出常量），任何模块可依赖它，它不依赖任何内部模块。
 - `ui` 也接近叶节点（仅 `mode_label` 懒导入 `config`）。
 - **`ui` 只被 `cli.py` 依赖**（v0.1.7 起分层架构，逻辑模块不直接调 `ui.*`）。
 - 禁止反向依赖或循环导入。
 
-### 4.2 零运行时依赖（硬约束）
-- 不可引入 `requests`/`colorama`/`rich` 等三方包。HTTP 用 `urllib.request`，彩色输出用 ANSI + `ctypes`，路径用 `pathlib`。
-- 任何"加个依赖更方便"的提案都需先权衡"零依赖"这个卖点。
+### 4.2 核心零运行时依赖（硬约束）
+- 基础安装不可引入 `requests`/`colorama`/`rich` 等三方包。HTTP 用 `urllib.request`，彩色输出用 ANSI + `ctypes`，路径用 `pathlib`。
+- `bili-dl[login]` 是明确的窄例外：二维码渲染使用 `qrcode`，RSA-OAEP 使用 `cryptography`，不把它们带入基础下载安装。
+- 任何"加个依赖更方便"的提案都需先权衡基础安装的零依赖卖点。
 
 ### 4.3 命名
 - Python 模块用 `snake_case`；CLI 旗帜沿袭 Unix 惯例（`--all/-v/-a` 模式、`--proxy`、`-k/--insecure`、`-V/--version`）。短选项占用清单见 §2.10。

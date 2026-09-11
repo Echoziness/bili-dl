@@ -21,9 +21,11 @@ import tempfile
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Optional
 
+from . import authrefresh, authstate
 from .config import BILI_COOKIE_FILENAME, NAV_API, NAV_TIMEOUT, USER_AGENT
 from .cookiesource import find_source, import_cookie, read_lines
 from .paths import config_dir
@@ -167,8 +169,10 @@ def validate(cookie_dir: Optional[Path] = None) -> ValidationResult:
     )
 
 
-def store_qr_cookie(cookie_lines: list[str], cookie_dir: Optional[Path] = None) -> QrStoreResult:
-    """Validate QR-login cookies online, then atomically replace the output file.
+def _store_verified_cookie(
+    cookie_lines: list[str], cookie_dir: Optional[Path], success_message: str
+) -> QrStoreResult:
+    """Validate a replacement session online, then atomically store it.
 
     The previous cookie file remains untouched unless Bilibili's ``nav`` API
     confirms the newly received session.  Unlike :func:`validate`, this does
@@ -208,7 +212,74 @@ def store_qr_cookie(cookie_lines: list[str], cookie_dir: Optional[Path] = None) 
                 temp_path.unlink()
 
     uname = data.get("data", {}).get("uname", "?")
-    return QrStoreResult(True, [("ok", f"[登录] 成功 | 已登录: {uname}")])
+    return QrStoreResult(True, [("ok", success_message.format(uname=uname))])
+
+
+def store_qr_cookie(cookie_lines: list[str], cookie_dir: Optional[Path] = None) -> QrStoreResult:
+    """Validate QR-login cookies online, then atomically replace the output file."""
+    return _store_verified_cookie(cookie_lines, cookie_dir, "[登录] 成功 | 已登录: {uname}")
+
+
+def store_qr_session(
+    cookie_lines: list[str], refresh_token: Optional[str], cookie_dir: Optional[Path] = None
+) -> QrStoreResult:
+    """Store a verified QR session and its renewal credential together.
+
+    The cookie remains usable if writing the optional renewal state fails; the
+    result explicitly reports that automatic renewal is unavailable instead
+    of pretending that the credential was durably stored.
+    """
+    result = store_qr_cookie(cookie_lines, cookie_dir)
+    if not result.success:
+        return result
+    if not refresh_token:
+        result.messages.append(("warn", "[登录] B 站未返回续期凭证，需在会话失效后重新扫码"))
+        return result
+    error = authstate.save(authstate.AuthState(refresh_token), cookie_dir)
+    if error:
+        result.messages.append(("warn", f"[登录] 会话已保存，但自动续期不可用：{error}"))
+    else:
+        result.messages.append(("info", "[登录] 已启用每日会话续期检查"))
+    return result
+
+
+def _utc_today() -> str:
+    """Use a UTC calendar day for the once-per-day remote renewal check."""
+    return datetime.now(UTC).date().isoformat()
+
+
+def _renew_if_due(cookie_dir: Optional[Path]) -> list[tuple[str, str]]:
+    """Refresh a verified session only when Bilibili requests it for the day."""
+    state, error = authstate.load(cookie_dir)
+    if error:
+        return [("warn", f"[登录] 自动续期不可用：{error}")]
+    if state is None or state.last_refresh_check_utc == _utc_today():
+        return []
+
+    renewal = authrefresh.check_and_refresh(bili_cookie_path(cookie_dir), state.refresh_token)
+    messages = list(renewal.messages)
+    if not renewal.checked:
+        return messages
+    if not renewal.refreshed:
+        error = authstate.save(authstate.AuthState(state.refresh_token, _utc_today()), cookie_dir)
+        if error:
+            messages.append(("warn", f"[登录] 无法记录每日续期检查：{error}"))
+        return messages
+
+    stored = _store_verified_cookie(
+        renewal.cookie_lines, cookie_dir, "[登录] 会话已自动刷新 | 已登录: {uname}"
+    )
+    messages.extend(stored.messages)
+    if not stored.success or renewal.refresh_token is None:
+        return messages
+    error = authstate.save(authstate.AuthState(renewal.refresh_token, _utc_today()), cookie_dir)
+    if error:
+        messages.append(("warn", f"[登录] 新会话已保存，但自动续期不可用：{error}"))
+        return messages
+    error = authrefresh.confirm(renewal)
+    if error:
+        messages.append(("warn", f"[登录] 新会话已保存，但无法确认旧续期凭证：{error}"))
+    return messages
 
 
 def ensure_cookie(cookie_dir: Optional[Path] = None) -> EnsureResult:
@@ -222,7 +293,7 @@ def ensure_cookie(cookie_dir: Optional[Path] = None) -> EnsureResult:
 
     result = validate(cookie_dir)
     if result.valid:
-        return EnsureResult(ready=True, messages=result.messages)
+        return EnsureResult(ready=True, messages=result.messages + _renew_if_due(cookie_dir))
 
     msgs.extend(result.messages)
 

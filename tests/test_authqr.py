@@ -65,6 +65,32 @@ def test_has_sessdata_requires_bilibili_domain() -> None:
     assert not authqr._has_sessdata([".example.com\tTRUE\t/\tTRUE\t0\tSESSDATA\tevil"])
 
 
+def test_poll_returns_refresh_token_from_a_successful_qr_login(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    jar = http.cookiejar.CookieJar()
+    jar.set_cookie(_cookie("SESSDATA", "session"))
+    session = authqr.QrSession(
+        url="https://example.com/qr",
+        key="key",
+        jar=jar,
+        opener=urllib.request.build_opener(),
+    )
+    monkeypatch.setattr(
+        authqr,
+        "_request_json",
+        lambda opener, request: (
+            {"code": 0, "data": {"code": 0, "refresh_token": "refresh-token"}},
+            None,
+        ),
+    )
+
+    result = authqr.poll(session, sleep=False)
+
+    assert result.success is True
+    assert result.refresh_token == "refresh-token"
+
+
 def test_poll_keeps_waiting_while_qr_is_scanned_but_unconfirmed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

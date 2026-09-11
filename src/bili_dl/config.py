@@ -7,6 +7,10 @@ NAV_API = "https://api.bilibili.com/x/web-interface/nav"
 REFERER = "https://www.bilibili.com"
 QR_GENERATE_API = "https://passport.bilibili.com/x/passport-login/web/qrcode/generate"
 QR_POLL_API = "https://passport.bilibili.com/x/passport-login/web/qrcode/poll"
+COOKIE_INFO_API = "https://passport.bilibili.com/x/passport-login/web/cookie/info"
+COOKIE_REFRESH_API = "https://passport.bilibili.com/x/passport-login/web/cookie/refresh"
+COOKIE_CONFIRM_REFRESH_API = "https://passport.bilibili.com/x/passport-login/web/confirm/refresh"
+CORRESPOND_URL_PREFIX = "https://www.bilibili.com/correspond/1/"
 
 # User-Agent for the nav validity probe. Bilibili returns HTTP 412 to
 # urllib's default "Python-urllib/x.y" UA — must masquerade as a browser.
@@ -48,6 +52,11 @@ NAV_TIMEOUT = 5.0
 QR_TIMEOUT = 10.0
 QR_LOGIN_MAX_POLLS = 180
 QR_POLL_INTERVAL = 1.0
+
+# Web Cookie renewal endpoints use the same short, failure-tolerant network
+# budget as the normal login probe.  A renewal check is throttled to once per
+# UTC day, with an explicit re-login remaining the fallback for every error.
+AUTH_STATE_FILENAME = "auth_state.json"
 
 # Repair-AudioContainer: minimum ratio of (new size / original size) for the
 # remuxed file to be considered successful. Guards against truncated output.

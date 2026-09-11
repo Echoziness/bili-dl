@@ -42,6 +42,8 @@ cookies_all.txt
 cookies_bilibili.txt
 cookies_bilibili.txt.bak_*
 .cookies_bilibili.txt.*.tmp
+auth_state.json
+.auth_state.json.*.tmp
 *.m4a
 *.mp4
 *.mkv
