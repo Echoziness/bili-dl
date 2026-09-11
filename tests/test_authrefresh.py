@@ -83,6 +83,20 @@ def test_check_and_refresh_records_a_successful_no_refresh_check(
     assert result.messages == []
 
 
+def test_check_requirement_is_read_only_and_reports_bilibili_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    jar = _jar()
+    monkeypatch.setattr(authrefresh, "_load_jar", lambda path: (jar, None))
+    monkeypatch.setattr(
+        authrefresh,
+        "_request_json",
+        lambda opener, request: ({"code": 0, "data": {"refresh": False}}, None),
+    )
+
+    assert authrefresh.check_requirement(Path("unused")) == (False, None)
+
+
 def test_check_and_refresh_returns_new_candidate_before_confirmation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

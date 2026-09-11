@@ -26,9 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A failed renewal check never interrupts a currently valid download session
   or triggers an implicit QR prompt. Bilibili can still expire or revoke a
   session, in which case the user explicitly runs `bili-dl login` again.
-- `bili-dl --status` inspects Cookie and automatic-renewal state without
-  requiring download tools, downloading media, prompting for login, or
-  triggering a renewal request.
+- `bili-dl --status` shows only user-meaningful state: the logged-in account,
+  Bilibili's current renewal requirement, and whether automatic renewal is
+  enabled. It needs no download tools and never downloads, prompts, or
+  refreshes a session.
 
 ### Tests
 

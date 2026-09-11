@@ -177,7 +177,7 @@ bili-dl --batch-file urls.txt
 | `--no-color` | disable colored output (also: `NO_COLOR` env var) |
 | `--config FILE` | override config file path |
 | `--batch-file FILE` | download URLs listed in a text file |
-| `--status` | inspect Cookie and automatic-renewal status without downloading |
+| `--status` | show login, Bilibili's current renewal requirement, and automatic-renewal status; never downloads or refreshes |
 | `-V`, `--version` | show version |
 | `-h`, `--help` | show help |
 

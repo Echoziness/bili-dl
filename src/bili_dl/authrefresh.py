@@ -51,6 +51,17 @@ class RenewalResult:
     messages: list[tuple[str, str]] = field(default_factory=list)
 
 
+@dataclass
+class RenewalRequirement:
+    """Read-only answer to whether Bilibili currently requests renewal."""
+
+    required: Optional[bool] = None
+    timestamp: Optional[int] = None
+    opener: Optional[urllib.request.OpenerDirector] = None
+    jar: Optional[http.cookiejar.CookieJar] = None
+    error: Optional[str] = None
+
+
 class _RefreshCsrfParser(HTMLParser):
     """Extract the server-rendered token from Bilibili's correspond page."""
 
@@ -199,35 +210,60 @@ def _refresh_csrf(
     return parser.value, None
 
 
+def _renewal_requirement(cookie_path: Path) -> RenewalRequirement:
+    """Ask Bilibili whether it currently requests a Web-session refresh."""
+    jar, error = _load_jar(cookie_path)
+    if jar is None:
+        return RenewalRequirement(error=error)
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+    csrf = _cookie_value(jar, "bili_jct")
+    if not csrf:
+        return RenewalRequirement(error="Cookie 缺少 bili_jct")
+    info_url = f"{COOKIE_INFO_API}?{urllib.parse.urlencode({'csrf': csrf})}"
+    payload, error = _request_json(opener, _request(info_url))
+    if payload is None:
+        return RenewalRequirement(error=error)
+    data = payload.get("data")
+    if payload.get("code") != 0 or not isinstance(data, dict):
+        return RenewalRequirement(error=str(payload.get("message") or "B 站拒绝检查会话续期"))
+    required = data.get("refresh")
+    if not isinstance(required, bool):
+        return RenewalRequirement(error="B 站未返回会话续期状态")
+    timestamp = data.get("timestamp")
+    if required and not isinstance(timestamp, int):
+        return RenewalRequirement(error="B 站未返回会话续期时间戳")
+    return RenewalRequirement(
+        required=required,
+        timestamp=timestamp if isinstance(timestamp, int) else None,
+        opener=opener,
+        jar=jar,
+    )
+
+
+def check_requirement(cookie_path: Path) -> tuple[Optional[bool], Optional[str]]:
+    """Read Bilibili's current refresh requirement without changing a session."""
+    result = _renewal_requirement(cookie_path)
+    return result.required, result.error
+
+
 def check_and_refresh(cookie_path: Path, refresh_token: str) -> RenewalResult:
     """Check Bilibili's daily renewal flag and refresh when it requests one.
 
     The returned candidate is not written to disk and old refresh-token
     confirmation is intentionally deferred to :func:`confirm`.
     """
-    jar, error = _load_jar(cookie_path)
-    if jar is None:
-        return RenewalResult(messages=[("warn", f"[登录] 无法检查会话续期：{error}")])
-    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
-    csrf = _cookie_value(jar, "bili_jct")
-    if not csrf:
-        return RenewalResult(messages=[("warn", "[登录] Cookie 缺少 bili_jct，跳过会话续期")])
-
-    info_url = f"{COOKIE_INFO_API}?{urllib.parse.urlencode({'csrf': csrf})}"
-    payload, error = _request_json(opener, _request(info_url))
-    if payload is None:
-        return RenewalResult(messages=[("warn", f"[登录] 无法检查会话续期：{error}")])
-    data = payload.get("data")
-    if payload.get("code") != 0 or not isinstance(data, dict):
-        message = str(payload.get("message") or "B 站拒绝检查会话续期")
-        return RenewalResult(messages=[("warn", f"[登录] 无法检查会话续期：{message}")])
-    if data.get("refresh") is not True:
+    requirement = _renewal_requirement(cookie_path)
+    if requirement.error:
+        return RenewalResult(messages=[("warn", f"[登录] 无法检查会话续期：{requirement.error}")])
+    if requirement.required is False:
         return RenewalResult(checked=True)
-    timestamp = data.get("timestamp")
-    if not isinstance(timestamp, int):
-        return RenewalResult(messages=[("warn", "[登录] B 站未返回会话续期时间戳")])
+    if requirement.timestamp is None or requirement.opener is None or requirement.jar is None:
+        return RenewalResult(messages=[("warn", "[登录] 会话续期检查缺少上下文")])
+    csrf = _cookie_value(requirement.jar, "bili_jct")
+    if not csrf:
+        return RenewalResult(messages=[("warn", "[登录] 刷新前会话缺少 bili_jct")])
 
-    refresh_csrf, error = _refresh_csrf(opener, timestamp)
+    refresh_csrf, error = _refresh_csrf(requirement.opener, requirement.timestamp)
     if refresh_csrf is None:
         return RenewalResult(messages=[("warn", f"[登录] 无法刷新会话：{error}")])
     form = urllib.parse.urlencode(
@@ -238,7 +274,7 @@ def check_and_refresh(cookie_path: Path, refresh_token: str) -> RenewalResult:
             "refresh_token": refresh_token,
         }
     ).encode()
-    payload, error = _request_json(opener, _request(COOKIE_REFRESH_API, form))
+    payload, error = _request_json(requirement.opener, _request(COOKIE_REFRESH_API, form))
     if payload is None:
         return RenewalResult(messages=[("warn", f"[登录] 无法刷新会话：{error}")])
     data = payload.get("data")
@@ -247,8 +283,8 @@ def check_and_refresh(cookie_path: Path, refresh_token: str) -> RenewalResult:
         message = str(payload.get("message") or "B 站拒绝刷新会话")
         return RenewalResult(messages=[("warn", f"[登录] 无法刷新会话：{message}")])
 
-    lines = _netscape_lines(jar)
-    if not _cookie_value(jar, "SESSDATA"):
+    lines = _netscape_lines(requirement.jar)
+    if not _cookie_value(requirement.jar, "SESSDATA"):
         return RenewalResult(messages=[("warn", "[登录] 刷新未返回 SESSDATA，保留原会话")])
     return RenewalResult(
         checked=True,
@@ -256,8 +292,8 @@ def check_and_refresh(cookie_path: Path, refresh_token: str) -> RenewalResult:
         cookie_lines=lines,
         refresh_token=new_token,
         old_refresh_token=refresh_token,
-        opener=opener,
-        jar=jar,
+        opener=requirement.opener,
+        jar=requirement.jar,
     )
 
 

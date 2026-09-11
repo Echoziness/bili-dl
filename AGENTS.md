@@ -196,7 +196,7 @@
 
 ### 2.25 独立扫码登录与 B 站要求的会话续期（Unreleased）
 - **边界**：`bili-dl login` 建立独立 B 站 Web 会话，不读取浏览器 Profile/Cookie、不假设任何浏览器存在。只有显式 login 才展示二维码；下载、批处理与 REPL 绝不隐式等待扫码。
-- **可观测性**：`bili-dl --status` 是只读状态入口，不要求 yt-dlp/ffmpeg，不下载、不续期、不扫码；它在线验证当前 Cookie，并显示刷新凭证是否存在及最近成功的每日检查日期。
+- **可观测性**：`bili-dl --status` 是只读状态入口，不要求 yt-dlp/ffmpeg，不下载、不续期、不扫码；它显示已登录账号、B 站此刻是否要求续期、自动续期是否已启用。它不显示无法预测的"下次续期时间"或实现内部的节流日期。
 - **状态**：QR poll 成功的完整 B 站 Cookie 先经 `nav` 验证再原子写 `cookies_bilibili.txt`；返回的 `refresh_token` 单独写同目录 `auth_state.json`（POSIX `0600`，两者及临时文件均须 Git 忽略）。状态写盘失败不得掩盖“Cookie 已可下载”的事实，必须警告自动续期不可用。
 - **续期语义**：不是"永久登录"。只在 Cookie 已通过 nav 校验后、每 UTC 日首次下载前查询 `cookie/info`；B 站要求刷新才走 `correspond → refresh → confirm`。新 Cookie 必须 nav 验证并持久化新 token 后才确认旧 token；网络或协议失败保留当前有效 Cookie 并继续下载。会话已被 B 站撤销时只提示用户显式重跑 login。
 - **依赖**：核心下载仍零运行时依赖；`bili-dl[login]` 为二维码和 RSA-OAEP 带入 `qrcode`、`cryptography`。不得手写密码学或将二维码 URL/凭证发往第三方服务。
