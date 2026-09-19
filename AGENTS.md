@@ -60,13 +60,12 @@
 - 原 bd.ps1 用 `[Environment]::GetFolderPath('MyVideos')` 是 Windows 专属；Python 版 `paths.py` 用 `sys.platform` 分支 + XDG 约定，同一代码三平台通用。
 - Windows 用 `%APPDATA%\bili-dl` 存 cookie，`~/Videos` 改为 `Path.home()/"Videos"`（避免 SHGetKnownFolderPath 零依赖约束）。
 
-### 2.9 Windows CJK 编码策略：绝不强制 UTF-8（踩坑沉淀）
-- **现象**：初版曾加 `subprocess.run(..., encoding="utf-8")` 解码 yt-dlp 的 `--print filename` 输出 + `sys.stdout.reconfigure("utf-8")`。结果**任何非 ASCII 标题的下载都 `[失败]`**：phase1 预测路径与 phase2 yt-dlp 实际写入磁盘的文件名不一致，`out_path.exists()` 返回 False。
-- **根因**：yt-dlp 在 Windows 默认按系统 locale（cp936/gbk）编码 stdout。强制用 UTF-8 解码 cp936 字节得到的是真·乱码 unicode，与 yt-dlp 用 Win32 UTF-16 写入磁盘的正确文件名不匹配；反之默认 locale 解码（yt-dlp encode 与 Python decode 同为 cp936）虽然 unicode 含 GBK 外字符会丢字符，但 predict 路径字符串与磁盘文件名（同样经 yt-dlp encode）完全一致，`exists()` 稳定 True。
-- **解法（已固化）**：`src/bili_dl/cli.py` 顶部注释明确"**不** reconfigure stdio、**不**设 `PYTHONUTF8`"，`downloader.py` predict 用 `subprocess.run(..., text=True)` **不传 encoding**，让两侧都用宿主默认 locale。
-- **权衡**：常见汉字全在 GBK 范围内（99% 标题无丢失），少数生僻字/emoji 在 yt-dlp 内部已 replace，不影响路径定位。这是最少惊讶、跨平台最稳的方案。**任何"加 UTF-8 更现代"的 PR 都必须先验证 CJK 标题下载不破。**
-- **测试锚定**：暂无单测（需真实 yt-dlp 子进程）；集成验证靠实跑 BV1froEBxEcX（《春死诀》全 CJK 标题）确认 `[完成!]` 而非 `[失败]`。
-- **环境差异**：bd.ps1 原版在 PowerShell 下靠 `chcp 65001 + PYTHONUTF8=1` 强制全程 UTF-8（PowerShell 调子进程的固有编码坑）；纯 Python 跨平台版不沿用，因 Python 与终端/yt-dlp 默认 locale 自洽。
+### 2.9 Windows 文件名预测只对机器通道强制 UTF-8（v0.4.1 修正）
+- **历史现象**：初版只给父进程 `subprocess.run(..., encoding="utf-8")`，却没有让 yt-dlp 同样输出 UTF-8；在 CP936 Windows 上会把子进程字节错误解码，导致普通中文标题的预测路径乱码。全局 `sys.stdout.reconfigure("utf-8")` / `PYTHONUTF8` 也会改变用户终端行为，因此当时回退到宿主 locale。
+- **新证据（2026-09）**：标题 `【诗岸⧸洛天依】` 的 `⧸`（U+29F8）不属于 CP936。yt-dlp 的 `--print filename` 管道按 CP936 输出时会丢掉该字符，但真实下载通过 Windows Unicode 文件系统保留它；phase1 预测为“诗岸洛天依”，phase2 实际写成“诗岸⧸洛天依”，`out_path.exists()` 误判失败。旧有“GBK 外字符在预测和磁盘两侧会一致丢失”的假设已被反证。
+- **解法**：仅在 phase1 机器可读通道给 yt-dlp 传官方 `--encoding utf-8`，父进程同时用 `encoding="utf-8"` 解码。phase2、CLI stdio 和用户终端完全不变；仍禁止全局 reconfigure 或设置 `PYTHONUTF8`。
+- **测试锚定**：`tests/test_downloader.py::test_download_predict_uses_utf8_for_non_cp936_filename` 固定 `⧸` 回归；实测 BV1XkKL6nEQP 的预测路径与已下载文件一致。
+- **原则**：进程间的机器可读协议应由发送方与接收方显式约定同一编码；不能只改单侧解码，也不能把局部协议要求扩大成全局终端策略。
 
 ### 2.10 `-v` 被占用，`--version` 用 `-V`（CLI 短选项冲突）
 - **问题**：`-v` 已用于 `--video`（仅视频模式），再加 `-v/--version` 会被 argparse 拒绝（mutually exclusive group 与 version action 重复 dest）。
@@ -195,7 +194,7 @@
   - 测试锚定：`test_ffmpeg.py::test_cfa_enabled_registry_returns_1/0`（mock `sys.modules["winreg"]` 注入假模块——因 `winreg` 是函数内 import，`ff.winreg` 在非 win32 不存在，只能注入 `sys.modules`）；`test_cfa_hint_*`；`test_cli.py::test_main_top_level_exception_wrapped` 断言栈与环境行。
   - **环境陷阱**：venv 只装了 pytest 没有 coverage，`uv run coverage` 会静默落到系统环境（miniforge）的旧 bili-dl 上导致假失败。排障时先 `uv pip install coverage` 再测。venv 里也应补装 ruff/mypy 避免路径错乱。
 
-### 2.25 独立扫码登录与 B 站要求的会话续期（Unreleased）
+### 2.25 独立扫码登录与 B 站要求的会话续期（v0.4.0）
 - **边界**：`bili-dl login` 建立独立 B 站 Web 会话，不读取浏览器 Profile/Cookie、不假设任何浏览器存在。只有显式 login 才展示二维码；下载、批处理与 REPL 绝不隐式等待扫码。
 - **配置一致性**：`login`、`--status` 与下载必须解析同一份 `config.toml` 和 `cookie_dir`；非默认配置文件通过 `bili-dl login --config FILE` 指定，CLI `--cookie-dir` 仍优先于配置值。
 - **可观测性**：`bili-dl --status` 是只读状态入口，不要求 yt-dlp/ffmpeg，不下载、不续期、不扫码；它显示已登录账号、B 站此刻是否要求续期、自动续期是否已启用。它不显示无法预测的"下次续期时间"或实现内部的节流日期。
@@ -212,6 +211,13 @@
 - **现象**：Hatch 默认 sdist 会读取工作区内容；即使 `output/`、`tmp/` 没有被 Git 跟踪，本地 `uv build` 仍曾把研究文档、整个第三方仓库和其中的 `.env*` 文件装入 tar.gz。wheel 因已指定 `packages = ["src/bili_dl"]` 不受影响，但手动上传该 sdist 会造成供应链污染和潜在凭证泄露。
 - **解法**：`pyproject.toml` 的 `[tool.hatch.build.targets.sdist]` 使用显式 `include` 白名单，只允许 `src/`、`tests/`、README、CHANGELOG、LICENSE、pyproject 与 uv.lock；根目录 `/output/`、`/tmp/` 同时加入 `.gitignore`，但白名单才是发布安全边界。
 - **发布守门**：`publish.yml` 在上传前必须依次执行 `twine check`、扫描 sdist 禁止 `tmp/output/.env/Cookie/auth_state`、安装并启动 wheel、校验 `v<version>` 标签与包版本完全一致。不得只因 CI 源码测试通过就跳过产物验证。
+
+### 2.27 urllib 不会自动解压 B 站 gzip 响应（v0.4.1 修正）
+- **现象**：`cookie/info` 正确返回 `refresh=true`，但自动续期报“B 站未返回会话续期口令”。Cookie、refresh token、RSA 公钥、时间戳和 HTML 选择器均正常。
+- **根因**：`correspond` 返回 `HTTP 200 text/html` 和 `Content-Encoding: gzip`，正文以 gzip 魔数 `1f 8b` 开头；服务端即使收到 `Accept-Encoding: identity` 仍返回 gzip。`urllib` 不会自动解压，旧 `transport.fetch_text()` 直接把压缩字节按 UTF-8 解码，解析器自然找不到 `id="1-name"`。
+- **解法**：统一传输层在文本或 JSON 解析前集中处理 `Content-Encoding`；支持标准库可解的 `gzip`/`x-gzip` 和 `identity`，损坏或未知编码返回不含正文的 `HttpFailure("bad_data")`。不得在 `authrefresh` 内局部特判，否则其他认证接口仍会重复踩坑。
+- **安全性**：该失败发生在 refresh POST 之前，不会消耗 refresh token、替换 Cookie 或产生待确认事务；保留原会话继续下载是正确的降级行为。
+- **测试锚定**：`tests/test_transport.py` 覆盖 gzip JSON、gzip HTML、损坏 gzip 与原有未压缩响应。
 
 ## 3. 项目结构
 

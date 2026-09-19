@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Decode gzip-compressed Bilibili authentication responses before parsing them.
+  The `correspond` renewal endpoint may return gzip even when the client requests
+  `identity`; treating those bytes as UTF-8 made an otherwise valid session report
+  that Bilibili had not returned a renewal credential.
+- Force UTF-8 only for yt-dlp's machine-readable filename prediction. This keeps
+  characters outside the Windows system code page, such as `⧸`, aligned with the
+  Unicode filename yt-dlp writes to disk without changing terminal encoding or the
+  real download process.
+
 ## [0.4.0] - 2026-09-11
 
 ### Added — Browser-independent QR login and Web-session renewal
