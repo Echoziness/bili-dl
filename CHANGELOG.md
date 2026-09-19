@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   characters outside the Windows system code page, such as `⧸`, aligned with the
   Unicode filename yt-dlp writes to disk without changing terminal encoding or the
   real download process.
+- Remove an inherited `PYTHONHOME` only from yt-dlp subprocesses. This prevents
+  `uv run bili-dl` from starting an externally installed yt-dlp with uv's different
+  Python standard library and failing with `SRE module mismatch`.
 
 ## [0.4.0] - 2026-09-11
 

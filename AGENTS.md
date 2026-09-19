@@ -219,6 +219,12 @@
 - **安全性**：该失败发生在 refresh POST 之前，不会消耗 refresh token、替换 Cookie 或产生待确认事务；保留原会话继续下载是正确的降级行为。
 - **测试锚定**：`tests/test_transport.py` 覆盖 gzip JSON、gzip HTML、损坏 gzip 与原有未压缩响应。
 
+### 2.28 `uv run` 的 `PYTHONHOME` 不得泄漏给外部 yt-dlp（v0.4.1 修正）
+- **现象**：仓库内执行 `uv run bili-dl -a URL` 时，预测阶段报 `AssertionError: SRE module mismatch`；同一个 `C:\Users\16697\miniforge3\Scripts\yt-dlp.exe` 在普通 PowerShell 中直接运行正常。
+- **根因**：`uv run` 为项目的 uv Python 3.11 设置 `PYTHONHOME`，外部 yt-dlp 启动器实际绑定 Miniforge Python 3.14。子进程继承该变量后，3.14 解释器加载了 3.11 标准库，`_sre` 与 `re._compiler` 版本不匹配，甚至在 yt-dlp 解析参数前就崩溃。
+- **解法**：两个 yt-dlp 子进程都接收父环境的副本，但显式移除 `PYTHONHOME`，让外部可执行文件使用自身解释器与标准库。保留 `PATH`、代理及其他用户环境；不全局修改当前进程，也不影响原生 ffmpeg。
+- **测试锚定**：`tests/test_downloader.py::test_download_does_not_leak_pythonhome_to_external_ytdlp` 断言两个阶段均移除 `PYTHONHOME` 且保留无关环境变量；真实 `uv run` 预测调用已验证成功。
+
 ## 3. 项目结构
 
 ```

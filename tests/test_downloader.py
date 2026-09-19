@@ -342,6 +342,44 @@ def test_download_predict_uses_utf8_for_non_cp936_filename(
     assert "--encoding" not in calls[1][0]
 
 
+def test_download_does_not_leak_pythonhome_to_external_ytdlp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """uv's interpreter home must not poison yt-dlp from another Python install."""
+    monkeypatch.setenv("PYTHONHOME", str(tmp_path / "uv-python"))
+    monkeypatch.setenv("BILI_DL_TEST_ENV", "preserved")
+    out_file = tmp_path / "a" / "title.m4a"
+    calls: list[dict[str, object]] = []
+
+    def fake_run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        calls.append(kwargs)
+        if len(calls) == 1:
+            return _completed_process(args, 0, stdout=str(out_file))
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+        out_file.write_bytes(b"\x00")
+        return _completed_process(args, 0)
+
+    monkeypatch.setattr(downloader.subprocess, "run", fake_run)
+    cfg = DownloadConfig(
+        mode="a",
+        video_dir=tmp_path / "v",
+        audio_dir=tmp_path / "a",
+        cookie_path=tmp_path / "c.txt",
+        ytdlp="yt-dlp",
+        ffmpeg_bin=None,
+    )
+
+    result = downloader.download("https://bilibili.com/video/BV1", cfg)
+
+    assert result.success is True
+    assert len(calls) == 2
+    for kwargs in calls:
+        env = kwargs.get("env")
+        assert isinstance(env, dict)
+        assert "PYTHONHOME" not in env
+        assert env["BILI_DL_TEST_ENV"] == "preserved"
+
+
 # ─── find_ytdlp + audio mode with ffmpeg repair ──────────────────────────────
 
 

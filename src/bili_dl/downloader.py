@@ -22,6 +22,7 @@ for turning result messages into terminal output.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -110,6 +111,10 @@ def download(url: str, cfg: DownloadConfig) -> DownloadResult:
     tmpl = _template_for(cfg.mode, cfg.video_dir, cfg.audio_dir)
     fmt = _format_for(cfg.mode)
     merge = [] if cfg.mode == "a" else ["--merge-output-format", "mp4"]
+    # uv may set PYTHONHOME for this project's interpreter. An external yt-dlp
+    # can belong to another Python installation and must resolve its own stdlib.
+    ytdlp_env = os.environ.copy()
+    ytdlp_env.pop("PYTHONHOME", None)
 
     # Phase 1: predict output path (no download) -------------------------------
     predict = subprocess.run(
@@ -131,6 +136,7 @@ def download(url: str, cfg: DownloadConfig) -> DownloadResult:
         capture_output=True,
         text=True,
         encoding="utf-8",
+        env=ytdlp_env,
     )
     if not predict.stdout.strip():
         detail = predict.stderr.strip().splitlines()
@@ -150,7 +156,7 @@ def download(url: str, cfg: DownloadConfig) -> DownloadResult:
         )
 
     # Phase 2: real download (inherit stdout/stderr for the progress bar) ----
-    result = subprocess.run([ytdlp, *common, "-f", fmt, *merge, "-o", tmpl, url])
+    result = subprocess.run([ytdlp, *common, "-f", fmt, *merge, "-o", tmpl, url], env=ytdlp_env)
 
     if not out_path.exists():
         return DownloadResult(
