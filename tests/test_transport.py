@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip
 import json
 import urllib.error
 import urllib.request
@@ -14,8 +15,9 @@ from bili_dl.config import REFERER, USER_AGENT
 
 
 class _Response:
-    def __init__(self, body: bytes) -> None:
+    def __init__(self, body: bytes, content_encoding: Optional[str] = None) -> None:
         self.body = body
+        self.headers = {"Content-Encoding": content_encoding} if content_encoding else {}
 
     def read(self) -> bytes:
         return self.body
@@ -28,14 +30,20 @@ class _Response:
 
 
 class _Opener:
-    def __init__(self, body: bytes = b"{}", error: Optional[Exception] = None) -> None:
+    def __init__(
+        self,
+        body: bytes = b"{}",
+        error: Optional[Exception] = None,
+        content_encoding: Optional[str] = None,
+    ) -> None:
         self.body = body
         self.error = error
+        self.content_encoding = content_encoding
 
     def open(self, request: urllib.request.Request, timeout: float) -> _Response:
         if self.error is not None:
             raise self.error
-        return _Response(self.body)
+        return _Response(self.body, self.content_encoding)
 
 
 def test_cookie_opener_none_leaves_environment_proxy_to_urllib(
@@ -107,6 +115,16 @@ def test_fetch_json_returns_a_mapping() -> None:
     assert failure is None
 
 
+def test_fetch_json_decompresses_gzip_before_decoding() -> None:
+    payload = {"code": 0, "data": {"refresh": True}}
+    opener = _Opener(gzip.compress(json.dumps(payload).encode()), content_encoding="gzip")
+
+    result, failure = transport.fetch_json(opener, transport.request("https://example.com"))
+
+    assert result == payload
+    assert failure is None
+
+
 @pytest.mark.parametrize(
     ("opener", "kind", "status"),
     [
@@ -143,3 +161,22 @@ def test_fetch_text_uses_the_same_network_failure_vocabulary() -> None:
 
     assert result is None
     assert failure == transport.HttpFailure("network")
+
+
+def test_fetch_text_decompresses_gzip_correspond_page() -> None:
+    page = '<div id="1-name">refresh-csrf</div>'
+    opener = _Opener(gzip.compress(page.encode()), content_encoding="gzip")
+
+    result, failure = transport.fetch_text(opener, transport.request("https://example.com"))
+
+    assert result == page
+    assert failure is None
+
+
+def test_fetch_text_rejects_invalid_gzip_as_bad_data() -> None:
+    opener = _Opener(b"not-a-gzip-stream", content_encoding="gzip")
+
+    result, failure = transport.fetch_text(opener, transport.request("https://example.com"))
+
+    assert result is None
+    assert failure == transport.HttpFailure("bad_data")

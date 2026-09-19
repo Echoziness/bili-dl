@@ -8,10 +8,12 @@ environment proxies; any non-empty value is used for both HTTP and HTTPS.
 
 from __future__ import annotations
 
+import gzip
 import http.cookiejar
 import json
 import urllib.error
 import urllib.request
+import zlib
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -60,6 +62,21 @@ def cookie_opener(
     return urllib.request.build_opener(*handlers)
 
 
+def _decode_body(
+    body: bytes, content_encoding: Optional[str]
+) -> tuple[Optional[str], Optional[HttpFailure]]:
+    """Decode one HTTP body without exposing compressed or malformed content."""
+    encoding = (content_encoding or "").strip().lower()
+    if encoding in {"gzip", "x-gzip"}:
+        try:
+            body = gzip.decompress(body)
+        except (gzip.BadGzipFile, EOFError, zlib.error):
+            return None, HttpFailure("bad_data")
+    elif encoding not in {"", "identity"}:
+        return None, HttpFailure("bad_data")
+    return body.decode("utf-8", errors="replace"), None
+
+
 def fetch_json(
     opener: urllib.request.OpenerDirector,
     req: urllib.request.Request,
@@ -68,12 +85,17 @@ def fetch_json(
     """Fetch and decode a JSON object using the shared failure vocabulary."""
     try:
         with opener.open(req, timeout=timeout) as response:
-            body = response.read().decode("utf-8", errors="replace")
-        payload = json.loads(body)
+            raw = response.read()
+            content_encoding = response.headers.get("Content-Encoding")
     except urllib.error.HTTPError as exc:
         return None, HttpFailure("http", exc.code)
     except (urllib.error.URLError, OSError):
         return None, HttpFailure("network")
+    body, failure = _decode_body(raw, content_encoding)
+    if body is None:
+        return None, failure
+    try:
+        payload = json.loads(body)
     except json.JSONDecodeError:
         return None, HttpFailure("bad_json")
     if not isinstance(payload, dict):
@@ -89,8 +111,10 @@ def fetch_text(
     """Fetch UTF-8 text using the shared failure vocabulary."""
     try:
         with opener.open(req, timeout=timeout) as response:
-            return response.read().decode("utf-8", errors="replace"), None
+            raw = response.read()
+            content_encoding = response.headers.get("Content-Encoding")
     except urllib.error.HTTPError as exc:
         return None, HttpFailure("http", exc.code)
     except (urllib.error.URLError, OSError):
         return None, HttpFailure("network")
+    return _decode_body(raw, content_encoding)
