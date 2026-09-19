@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-09-19
+
 ### Fixed
 
 - Decode gzip-compressed Bilibili authentication responses before parsing them.
@@ -537,6 +539,8 @@ the system *larger* without making it *simpler*.
 - `--version` is now exposed as `-V` (capital), since `-v` is taken by
   `--video`. Matches yt-dlp / curl / pip convention.
 
+[Unreleased]: https://github.com/Echoziness/bili-dl/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/Echoziness/bili-dl/compare/v0.4.0...v0.4.1
 [0.1.0]: https://github.com/Echoziness/bili-dl/releases/tag/v0.1.0
 [0.1.1]: https://github.com/Echoziness/bili-dl/releases/tag/v0.1.1
 [0.1.2]: https://github.com/Echoziness/bili-dl/releases/tag/v0.1.2
