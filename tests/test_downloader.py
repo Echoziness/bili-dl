@@ -307,6 +307,41 @@ def test_download_phase1_warns_but_proceeds(
     assert any("predict" in t for _, t in result.messages)
 
 
+def test_download_predict_uses_utf8_for_non_cp936_filename(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Prediction must preserve characters that Windows CP936 cannot encode."""
+    out_file = tmp_path / "a" / "诗岸⧸洛天依.m4a"
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def fake_run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        calls.append((args, kwargs))
+        if len(calls) == 1:
+            return _completed_process(args, 0, stdout=str(out_file))
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+        out_file.write_bytes(b"\x00")
+        return _completed_process(args, 0)
+
+    monkeypatch.setattr(downloader.subprocess, "run", fake_run)
+    cfg = DownloadConfig(
+        mode="a",
+        video_dir=tmp_path / "v",
+        audio_dir=tmp_path / "a",
+        cookie_path=tmp_path / "c.txt",
+        ytdlp="yt-dlp",
+        ffmpeg_bin=None,
+    )
+
+    result = downloader.download("https://bilibili.com/video/BV1", cfg)
+
+    assert result.success is True
+    predict_args, predict_kwargs = calls[0]
+    encoding_index = predict_args.index("--encoding")
+    assert predict_args[encoding_index + 1] == "utf-8"
+    assert predict_kwargs.get("encoding") == "utf-8"
+    assert "--encoding" not in calls[1][0]
+
+
 # ─── find_ytdlp + audio mode with ffmpeg repair ──────────────────────────────
 
 

@@ -9,8 +9,9 @@ call, so the bug class cannot recur.
 
 Two-phase download (unchanged from bd.ps1):
   1. ``--print filename --skip-download`` to predict the final output path
-     (without writing anything) so we can report it and locate the file
-     for audio extraction.
+     (without writing anything) so we can report it and locate the file.
+     This machine-readable channel is explicitly UTF-8 so characters outside
+     the Windows system code page still match the Unicode filename on disk.
   2. The real download with the same template/format, stdout inherited so
      yt-dlp's progress bar streams straight to the terminal.
 
@@ -115,6 +116,8 @@ def download(url: str, cfg: DownloadConfig) -> DownloadResult:
         [
             ytdlp,
             *common,
+            "--encoding",
+            "utf-8",
             "--print",
             "filename",
             "--skip-download",
@@ -127,6 +130,7 @@ def download(url: str, cfg: DownloadConfig) -> DownloadResult:
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     if not predict.stdout.strip():
         detail = predict.stderr.strip().splitlines()
