@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ssl
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -107,8 +108,13 @@ def test_first_returned_track_and_requested_part_are_preserved(
     for opener in (authenticated, public):
         proxy = next(h for h in opener.handlers if isinstance(h, urllib.request.ProxyHandler))
         assert proxy.proxies["https"] == cfg.proxy
+        # Python 3.13's urllib installs a default TLS context on HTTPSHandler;
+        # the invariant is that subtitle/API requests never use an unverified
+        # context, not that the private handler attribute is None.
         assert not any(
-            isinstance(h, urllib.request.HTTPSHandler) and h._context is not None
+            isinstance(h, urllib.request.HTTPSHandler)
+            and getattr(h, "_context", None) is not None
+            and h._context.verify_mode == ssl.CERT_NONE
             for h in opener.handlers
         )
     assert "secret" not in repr(result)
