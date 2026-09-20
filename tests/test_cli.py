@@ -640,6 +640,28 @@ def test_repl_downloads_url_then_quit(monkeypatch: pytest.MonkeyPatch) -> None:
     assert called == ["https://bilibili.com/video/BV1"]
 
 
+def test_repl_switches_between_subtitles_and_media(monkeypatch: pytest.MonkeyPatch) -> None:
+    inputs = iter(["https://example", "a", "https://example", "s", "https://example", "q"])
+    monkeypatch.setattr("bili_dl.ui.prompt", lambda prompt: next(inputs))
+    monkeypatch.setattr(downloader, "find_ytdlp", lambda: "yt-dlp")
+    monkeypatch.setattr(ff, "find_ffmpeg", lambda: "ffmpeg")
+    calls = []
+
+    def run(url, cfg):
+        calls.append((cfg.mode, cfg.ytdlp, cfg.ffmpeg_bin))
+        return downloader.DownloadResult(True)
+
+    monkeypatch.setattr(downloader, "download", run)
+    assert cli._repl(cli.Options(mode="s"), None, None) == 0
+    assert calls == [("s", None, None), ("a", "yt-dlp", "ffmpeg"), ("s", None, None)]
+
+
+@pytest.mark.parametrize("media_flag", ["-a", "-v", "--all"])
+def test_subtitle_mode_is_mutually_exclusive(media_flag: str) -> None:
+    with pytest.raises(SystemExit):
+        _parse("-s", media_flag)
+
+
 # ─── main(): ensure_dir failure / top-level exception / merge edge cases ─────
 
 

@@ -1,6 +1,6 @@
 # bili-dl
 
-> Cross-platform Bilibili downloader — a thin, fast wrapper around `yt-dlp` + `ffmpeg`.
+> Cross-platform Bilibili video, audio and subtitle downloader.
 
 [![CI](https://github.com/Echoziness/bili-dl/actions/workflows/ci.yml/badge.svg)](https://github.com/Echoziness/bili-dl/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
@@ -26,10 +26,14 @@ automatic session renewal, and foobar2000-friendly audio output.
 - **Configurable** — set defaults in a TOML config file (`mode`, `proxy`,
   output dirs, etc.); CLI flags override per-invocation.
 - **Batch download** — download a list of URLs from a text file.
+- **Timestamped subtitles** — `-s` saves the first subtitle track returned by
+  Bilibili as a UTF-8 SRT file, with each cue's start and end timestamps. It reuses
+  your login and proxy without downloading media or requiring yt-dlp/ffmpeg.
 
 ## Install
 
-`bili-dl` needs `yt-dlp` and `ffmpeg` on your `PATH`:
+Video/audio downloads use `yt-dlp` and `ffmpeg` on your `PATH`. Subtitle-only
+downloads and login work with just `bili-dl` installed:
 
 ```bash
 pip install -U yt-dlp       # or: winget / brew / pipx
@@ -121,6 +125,7 @@ bili-dl                                       # interactive REPL
 bili-dl https://www.bilibili.com/video/BV...   # one-shot (video + audio)
 bili-dl -a https://www.bilibili.com/video/BV...  # audio only
 bili-dl -v https://www.bilibili.com/video/BV...  # video only
+bili-dl -s https://www.bilibili.com/video/BV...  # subtitle only (SRT)
 bili-dl --batch-file urls.txt                  # batch: download all URLs in file
 bili-dl --status                               # inspect login / renewal status
 ```
@@ -133,13 +138,38 @@ bili-dl --status                               # inspect login / renewal status
 
 Override with `--output-dir` / `--audio-dir`.
 
+### Subtitles
+
+```bash
+bili-dl -s "https://www.bilibili.com/video/BV1Got26ZE5K/"
+bili-dl --subtitle "https://www.bilibili.com/video/BV.../?p=2" --output-dir ./subtitles
+bili-dl -s --batch-file urls.txt --output-dir ./subtitles
+```
+
+Subtitle mode uses the same login, automatic session renewal, proxy and config
+as media downloads. In the interactive REPL, enter `s` to select it; `all`, `v`
+and `a` remain available. Use `mode = "s"` in the config for a persistent default.
+
+Only the **first track in Bilibili's returned list** is fetched, in server order.
+There is no language preference, sorting, automatic transcription, or fallback
+to a later track if the first one fails. A `?p=N` URL selects that part; otherwise
+part 1 is used. Regular BV/AV video URLs, bare BV/AV identifiers and `b23.tv`
+short links are supported. Bangumi/course URLs are not supported in this mode.
+
+SRT output goes into the video output directory (`--output-dir` / `video_dir`),
+named `title [BV…] p1.ai-zh.srt`, for example. Each cue retains its start and end
+times with millisecond precision. No video or audio file is downloaded. A missing
+subtitle or a failed request returns a failure status; an existing SRT is only
+replaced after the new file is fully written. Subtitle requests always verify
+TLS certificates; `-k` applies only to yt-dlp media downloads.
+
 ### Config file
 
 Save defaults in `config.toml` (in the cookie directory shown above) so you
 don't repeat CLI flags every time:
 
 ```toml
-mode = "a"                      # "all" | "v" | "a"
+mode = "a"                      # "all" | "v" | "a" | "s"
 proxy = "http://127.0.0.1:7890"
 insecure = false
 video_dir = "/path/to/videos"
@@ -178,6 +208,8 @@ bili-dl --batch-file urls.txt
 | `--all` | video + audio, merged MP4 + extracted M4A (default) |
 | `-v`, `--video` | video only (MP4) |
 | `-a`, `--audio` | audio only (M4A, faststart ISOM) |
+| `-s`, `--subtitle` | first returned subtitle track only (UTF-8 SRT with timestamps) |
+| `--output-dir DIR` | output directory for videos and subtitles |
 | `-k`, `--insecure` | skip yt-dlp TLS verification; login/session APIs remain verified |
 | `--proxy URL` | proxy for downloads and Bilibili APIs (env: `HTTPS_PROXY`/`HTTP_PROXY`) |
 | `--no-color` | disable colored output (also: `NO_COLOR` env var) |
@@ -229,7 +261,7 @@ If you enabled CFA and downloads fail after the video is written:
 
 ## Limitations
 
-- **Single video only** — `--no-playlist` is always passed, so multi-P
+- **Single video only** — media downloads always pass `--no-playlist`, so multi-P
   videos, collections, and favourites are not downloaded as a batch. Give
   each part's URL separately (or list them in a `--batch-file`).
 - **Batch downloads are sequential** — no concurrency. A long URL list takes
@@ -237,11 +269,10 @@ If you enabled CFA and downloads fail after the video is written:
 - **Re-downloading overwrites** — no `--no-overwrites` / `--continue` is
   passed to yt-dlp. Running the same URL twice re-downloads and replaces the
   file.
-- **Windows CJK filenames** — on a stock Windows console (cp936/GBK) titles
-  containing rare characters or emoji may lose those characters in the saved
-  filename. Common Chinese characters are unaffected. This is a deliberate
-  trade-off for reliable path matching (see AGENTS.md §2.9); forcing UTF-8
-  would silently break downloads instead.
+- **Windows CJK filenames** — machine-readable filename prediction and subtitle
+  files use explicit UTF-8, preserving Unicode titles independently of the
+  terminal's encoding. Subtitle filenames replace filesystem-invalid characters
+  and truncate long titles to fit common cross-platform filename limits.
 
 ## License
 

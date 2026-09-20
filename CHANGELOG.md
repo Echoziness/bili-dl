@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `-s` / `--subtitle` selects subtitle-only downloads in one-shot, batch and
+  interactive modes (`s`, also available as the configured default). It saves
+  only the first returned track as UTF-8 SRT with cue start/end timestamps,
+  respects the selected video part, and supports BV/AV inputs and short links.
+- Subtitle downloads reuse the existing login, renewal, proxy and output-dir
+  settings without requiring yt-dlp or ffmpeg. No-track, login and request
+  failures are reported explicitly; failed downloads preserve existing output.
+
+### Changed
+
+- Split media execution and subtitle fetching behind the common download
+  dispatcher and shared config/result contracts. Output directories are prepared
+  only for the selected mode; existing media download and post-processing
+  behavior remains in the media backend.
+- Share CookieJar loading through the HTTP transport for session renewal and
+  authenticated content requests. Subtitle CDN requests carry no session cookie.
+
 ## [0.4.1] - 2026-09-19
 
 ### Fixed

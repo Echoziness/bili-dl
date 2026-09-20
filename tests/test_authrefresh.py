@@ -70,7 +70,7 @@ def test_check_and_refresh_records_a_successful_no_refresh_check(
 ) -> None:
     jar = _jar()
     proxies: list[str | None] = []
-    monkeypatch.setattr(authrefresh, "_load_jar", lambda path: (jar, None))
+    monkeypatch.setattr(authrefresh.transport, "load_cookie_jar", lambda path: (jar, None))
     real_cookie_opener = authrefresh.transport.cookie_opener
     monkeypatch.setattr(
         authrefresh.transport,
@@ -97,7 +97,7 @@ def test_check_requirement_is_read_only_and_reports_bilibili_flag(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     jar = _jar()
-    monkeypatch.setattr(authrefresh, "_load_jar", lambda path: (jar, None))
+    monkeypatch.setattr(authrefresh.transport, "load_cookie_jar", lambda path: (jar, None))
     monkeypatch.setattr(
         authrefresh.transport,
         "fetch_json",
@@ -117,7 +117,7 @@ def test_check_and_refresh_returns_new_candidate_before_confirmation(
             ({"code": 0, "data": {"refresh_token": "new-token"}}, None),
         ]
     )
-    monkeypatch.setattr(authrefresh, "_load_jar", lambda path: (jar, None))
+    monkeypatch.setattr(authrefresh.transport, "load_cookie_jar", lambda path: (jar, None))
     monkeypatch.setattr(authrefresh.transport, "fetch_json", lambda opener, request: next(replies))
     monkeypatch.setattr(authrefresh, "_refresh_csrf", lambda opener, timestamp: ("csrf-2", None))
 
@@ -148,7 +148,7 @@ def test_confirm_pending_loads_the_current_cookie_session(
 ) -> None:
     cookie_path = tmp_path / "cookies.txt"
     jar = _jar()
-    monkeypatch.setattr(authrefresh, "_load_jar", lambda path: (jar, None))
+    monkeypatch.setattr(authrefresh.transport, "load_cookie_jar", lambda path: (jar, None))
     captured: list[tuple[http.cookiejar.CookieJar, str]] = []
     monkeypatch.setattr(
         authrefresh,

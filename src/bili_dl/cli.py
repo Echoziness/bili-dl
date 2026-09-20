@@ -16,6 +16,7 @@ Modes:
   all — video+audio (DASH, merged to MP4) + extract independent M4A
   v   — video only (single-file MP4 when such a stream exists)
   a   — audio only (M4A, standardised to faststart ISOM)
+  s   — first returned subtitle track (SRT, with sentence timestamps)
 """
 
 from __future__ import annotations
@@ -35,14 +36,8 @@ from .config import VALID_MODES
 from .downloader import DownloadConfig
 from .paths import config_dir, config_file_path, default_audio_dir, default_video_dir, ensure_dir
 
-# Encoding policy: we deliberately do NOT force UTF-8 on stdio nor set
-# PYTHONUTF8. yt-dlp and Python both emit using the host's default locale
-# (cp936 on a stock Windows console, UTF-8 on Linux/mac). Keeping both sides
-# on the same locale means the predicted path (phase 1) and the file yt-dlp
-# actually writes (phase 2) decode to identical strings, so ``out_path.exists()``
-# stays reliable for CJK titles. Forcing UTF-8 here would mismatch yt-dlp's
-# cp936 output and silently break downloads of any non-ASCII title — verified
-# the hard way during initial bring-up.
+# Terminal encoding follows the host. Machine-readable yt-dlp output and
+# subtitle files explicitly use UTF-8 within their respective backends.
 
 # ─── Presentation: map logic-module message levels to ui functions ─────────
 _EMITTERS = {
@@ -73,6 +68,7 @@ _HELP_EPILOG = """\
 examples:
   bili-dl https://www.bilibili.com/video/BV...     # video + audio (default)
   bili-dl -a https://www.bilibili.com/video/BV...  # audio only (M4A)
+  bili-dl -s https://www.bilibili.com/video/BV...  # first subtitle track (SRT)
   bili-dl --batch-file urls.txt                    # batch download
   bili-dl --status                                 # inspect login and renewal state
   bili-dl login                                    # QR login
@@ -85,7 +81,7 @@ report issues: https://github.com/Echoziness/bili-dl/issues\
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="bili-dl",
-        description="Cross-platform Bilibili downloader (yt-dlp + ffmpeg wrapper).",
+        description="Cross-platform Bilibili video, audio and subtitle downloader.",
         epilog=_HELP_EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -107,6 +103,14 @@ def _build_parser() -> argparse.ArgumentParser:
         const="a",
         dest="mode",
         help="download audio only (M4A)",
+    )
+    mode.add_argument(
+        "-s",
+        "--subtitle",
+        action="store_const",
+        const="s",
+        dest="mode",
+        help="download the first returned subtitle track only (SRT with timestamps)",
     )
     # NOTE: -v is taken by --video; expose --version via -V. Both yt-dlp and
     # curl use the same convention (-V / --version), so users won't be surprised.
@@ -147,7 +151,7 @@ def _build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=None,
         metavar="DIR",
-        help="override video output directory",
+        help="override video/subtitle output directory",
     )
     p.add_argument(
         "--audio-dir",
@@ -370,8 +374,12 @@ def _status_command(opts: Options) -> int:
     return 0 if result.valid else 1
 
 
-def _run_once(opts: Options, url: str, ytdlp: str, ffmpeg_bin: Optional[str]) -> bool:
+def _run_once(opts: Options, url: str, ytdlp: Optional[str], ffmpeg_bin: Optional[str]) -> bool:
     """Execute one download and emit results. Returns success."""
+    # A REPL started in subtitle mode can later switch to a media mode.
+    if opts.mode != "s" and ytdlp is None:
+        ytdlp = downloader.find_ytdlp()
+        ffmpeg_bin = ff.find_ffmpeg()
     cfg = DownloadConfig(
         mode=opts.mode,
         video_dir=opts.video_dir or default_video_dir(),
@@ -387,7 +395,9 @@ def _run_once(opts: Options, url: str, ytdlp: str, ffmpeg_bin: Optional[str]) ->
     return result.success
 
 
-def _batch_download(opts: Options, urls: list[str], ytdlp: str, ffmpeg_bin: Optional[str]) -> int:
+def _batch_download(
+    opts: Options, urls: list[str], ytdlp: Optional[str], ffmpeg_bin: Optional[str]
+) -> int:
     """Download multiple URLs sequentially. Returns 0 if all succeed, 1 if any fail."""
     total = len(urls)
     ui.info(f"[批量] 共 {total} 个链接")
@@ -405,13 +415,16 @@ def _batch_download(opts: Options, urls: list[str], ytdlp: str, ffmpeg_bin: Opti
     return 1 if failures else 0
 
 
-def _repl(opts: Options, ytdlp: str, ffmpeg_bin: Optional[str]) -> int:
-    print(f"使用: {ytdlp}", file=sys.stderr)
+def _repl(opts: Options, ytdlp: Optional[str], ffmpeg_bin: Optional[str]) -> int:
+    if ytdlp:
+        print(f"使用: {ytdlp}", file=sys.stderr)
     print(file=sys.stderr)
     while True:
         label = ui.mode_label(opts.mode)
         try:
-            raw = ui.prompt(f"输入 B 站链接 (模式:{label} | all/v/a 切换 | q 退出): ")
+            raw = ui.prompt(
+                f"输入 B 站链接 (模式:{label} | {'/'.join(VALID_MODES)} 切换 | q 退出): "
+            )
         except EOFError:
             break
         if not raw.strip():
@@ -455,7 +468,7 @@ def _main_impl(argv: Optional[list[str]] = None) -> int:
     if args.no_color:
         ui.disable_color()
 
-    # Load config file, merge with CLI args + env vars (CLI > env > config) --
+    # Load config file, merge with CLI args + env vars (CLI > config > env) --
     cfg = _load_settings(args.config)
     opts = _merge_settings(args, cfg)
 
@@ -465,24 +478,22 @@ def _main_impl(argv: Optional[list[str]] = None) -> int:
         return _status_command(opts)
 
     # Dependency checks (same severity ladder as bd.ps1) ---------------------
-    ytdlp = downloader.find_ytdlp()
-    if not ytdlp:
+    ytdlp = downloader.find_ytdlp() if opts.mode != "s" else None
+    if opts.mode != "s" and not ytdlp:
         ui.error("[错误] 未找到 yt-dlp，请先安装 (pip install -U yt-dlp 或 winget install yt-dlp)")
         return 1
-    ffmpeg_bin = ff.find_ffmpeg()
-    if not ffmpeg_bin:
+    ffmpeg_bin = ff.find_ffmpeg() if opts.mode != "s" else None
+    if opts.mode != "s" and not ffmpeg_bin:
         ui.warn("[警告] 未找到 ffmpeg，将跳过音频提取与容器修复")
 
     try:
         ensure_dir(opts.cookie_dir or config_dir())
-        ensure_dir(opts.video_dir or default_video_dir())
-        ensure_dir(opts.audio_dir or default_audio_dir())
     except OSError as e:
-        ui.error(f"[错误] 无法创建输出目录: {e}")
-        ui.info("请检查路径权限或使用 --output-dir / --audio-dir 指定其他目录")
+        ui.error(f"[错误] 无法创建 Cookie 目录: {e}")
+        ui.info("请检查路径权限或使用 --cookie-dir 指定其他目录")
         return 1
 
-    ui.info("B 站视频下载工具")
+    ui.info("B 站视频 / 音频 / 字幕下载工具")
     print(file=sys.stderr)
 
     if not _prepare_cookie(opts):
@@ -501,14 +512,16 @@ def _main_impl(argv: Optional[list[str]] = None) -> int:
         if not urls:
             ui.warn("[警告] 批量文件中没有有效 URL")
             return 0
-        ui.info(f"使用: {ytdlp}")
+        if ytdlp:
+            ui.info(f"使用: {ytdlp}")
         ui.info(f"模式: {ui.mode_label(opts.mode)} | 批量文件: {args.batch_file}")
         print(file=sys.stderr)
         return _batch_download(opts, urls, ytdlp, ffmpeg_bin)
 
     # Non-interactive mode: one URL then exit --------------------------------
     if args.url:
-        ui.info(f"使用: {ytdlp}")
+        if ytdlp:
+            ui.info(f"使用: {ytdlp}")
         ui.info(f"模式: {ui.mode_label(opts.mode)} | URL: {args.url}")
         print(file=sys.stderr)
         ok = _run_once(opts, args.url, ytdlp, ffmpeg_bin)

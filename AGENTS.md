@@ -7,7 +7,7 @@
 - **语言**：Python 3.11+（v0.2.0 起提基线，因 `tomllib` 3.11 入 stdlib）
 - **构建**：hatchling（`pyproject.toml` 声明，`src/` 布局，版本号动态读取 `__init__.py`）
 - **运行时依赖**：`qrcode`（本地二维码）、`cryptography`（B 站 RSA-OAEP 续期协议）、`filelock`（跨进程会话事务锁）；HTTP、CLI、配置与彩色输出仍优先使用标准库。
-- **外部程序依赖**：`yt-dlp`（必需，找不到则报错退出）、`ffmpeg`（可选，缺失则降级跳过音频提取/容器修复）。
+- **外部程序依赖**：音视频模式需要 `yt-dlp`；`ffmpeg` 可选，缺失则降级跳过音频提取/容器修复。字幕模式不需要二者。
 - **工具链**：ruff（lint+format）、mypy（strict 模式，CI 强制）、pytest（测试）+ coverage（CI 报告）。
 - **分发**：目标 PyPI，包名 `bili-dl`，脚本入口 `bili-dl`。
 
@@ -251,7 +251,10 @@ bili-dl/
 │   ├── cookiesource.py            # Cookie 源文件检测 + 提取导入（纯逻辑，无 ui）
 │   ├── cookiestore.py             # Cookie 校验 + ensure_cookie 编排（纯逻辑，无 ui）
 │   ├── ffmpeg.py                  # ffprobe/ffmpeg 探测 + 零损失重封装/提取（纯逻辑，无 ui）
-│   ├── downloader.py              # yt-dlp 两阶段下载 + DownloadConfig（纯逻辑，无 ui）
+│   ├── downloader.py              # 统一下载入口：模式分发 + 按需创建输出目录
+│   ├── models.py                  # DownloadConfig / DownloadResult 共用契约
+│   ├── media.py                   # yt-dlp 两阶段下载 + 音视频后处理
+│   ├── subtitles.py               # 第一条字幕轨 → 带时间戳的 UTF-8 SRT
 │   ├── ui.py                      # ANSI 彩色输出到 stderr（clig.dev 合规）+ NO_COLOR/TTY 检查
 ├── tests/
 │   ├── test_cookiesource.py       # 隐私核心测试（其他站点不泄漏）+ 导入逻辑
@@ -260,7 +263,9 @@ bili-dl/
 │   ├── test_authrefresh.py         # 每日检查/刷新/确认协议 mock
 │   ├── test_authstate.py           # 刷新凭证状态的原子读写
 │   ├── test_transport.py           # 认证传输契约、代理三态与安全错误
-│   ├── test_downloader.py         # 参数拼装 + download() mock subprocess
+│   ├── test_downloader.py         # 统一入口分发与目录准备
+│   ├── test_media.py              # 参数拼装 + download() mock subprocess
+│   ├── test_subtitles.py          # 首轨选择、时间戳、原子写入与 CLI 集成
 │   ├── test_ffmpeg.py             # repair/extract mock subprocess 全分支
 │   ├── test_cli.py                # argparse parser + config 合并 + 批量下载 + main() mock
 │   ├── test_ui.py                 # _init TTY + colorize ANSI
@@ -276,7 +281,7 @@ bili-dl/
 ## 4. 关键约定
 
 ### 4.1 依赖方向
-`cli → settings → config`；`cli → cookiestore → cookiesource/authstate/authrefresh/transport`；`cli → downloader → ffmpeg`；`cli → paths → config`；`authqr/authrefresh/cookiestore → transport → config`；其他逻辑模块按需依赖 `config`。
+`cli → settings → config`；`cli → cookiestore → cookiesource/authstate/authrefresh/transport`；`cli → downloader → media/subtitles`；`media → ffmpeg`；`subtitles/authqr/authrefresh/cookiestore → transport → config`；`cli → paths → config`。下载入口与后端共用 `models`，其他逻辑模块按需依赖 `config`。
 - `config` 是叶节点（只导出常量），任何模块可依赖它，它不依赖任何内部模块。
 - `ui` 也接近叶节点（仅 `mode_label` 懒导入 `config`）。
 - **`ui` 只被 `cli.py` 依赖**（v0.1.7 起分层架构，逻辑模块不直接调 `ui.*`）。
@@ -288,7 +293,7 @@ bili-dl/
 - 新依赖必须有清晰的用户价值、安全维护性和移除困难度评估；"零依赖"本身不是目标。
 
 ### 4.3 命名
-- Python 模块用 `snake_case`；CLI 旗帜沿袭 Unix 惯例（`--all/-v/-a` 模式、`--proxy`、`-k/--insecure`、`-V/--version`）。短选项占用清单见 §2.10。
+- Python 模块用 `snake_case`；CLI 旗帜沿袭 Unix 惯例（`--all/-v/-a/-s` 模式、`--proxy`、`-k/--insecure`、`-V/--version`）。
 - yt-dlp format 串集中放 `config.py`（`FMT_AV`/`FMT_AUDIO`），不散落。
 
 ### 4.4 提交规范
@@ -305,6 +310,8 @@ bili-dl/
 
 ## 5. 常用命令
 
+字幕模式使用 `-s/--subtitle`、REPL `s` 或配置 `mode = "s"`，共用 `video_dir/--output-dir`。只取 API 返回的第一条字幕轨，不排序、不尝试后续轨，不做 ASR；保留逐句起止时间并原子写入 UTF-8 SRT。普通投稿链接的 `?p=N` 指定分 P，默认 P1。字幕 HTTP 复用 `transport`，CookieJar 加载由 `transport.load_cookie_jar` 统一提供；短链接与字幕 CDN 请求不携带登录 Cookie，TLS 始终校验。历史章节中的 yt-dlp 实现及测试位置现分别为 `media.py` / `test_media.py`。
+
 ```bash
 # 开发环境（一键装齐项目 + dev 工具到 .venv）
 uv sync --default-index "https://mirrors.aliyun.com/pypi/simple/"  # 国内网络用镜像
@@ -318,6 +325,7 @@ uv run pytest -q
 # 实测下载（需 yt-dlp + ffmpeg，且 cookie 目录有 cookies_bilibili.txt）
 bili-dl https://www.bilibili.com/video/BVxxxxx
 bili-dl -a https://www.bilibili.com/video/BVxxxxx   # 验证音频 faststart
+uv run bili-dl -s https://www.bilibili.com/video/BV1Got26ZE5K/ --output-dir output/subtitle-smoke
 
 # 独立扫码登录 / 只读会话状态
 uv run bili-dl login

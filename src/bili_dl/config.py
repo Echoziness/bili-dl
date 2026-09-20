@@ -4,6 +4,8 @@ from __future__ import annotations
 
 # Bilibili endpoints
 NAV_API = "https://api.bilibili.com/x/web-interface/nav"
+VIDEO_INFO_API = "https://api.bilibili.com/x/web-interface/view"
+PLAYER_INFO_API = "https://api.bilibili.com/x/player/wbi/v2"
 REFERER = "https://www.bilibili.com"
 QR_GENERATE_API = "https://passport.bilibili.com/x/passport-login/web/qrcode/generate"
 QR_POLL_API = "https://passport.bilibili.com/x/passport-login/web/qrcode/poll"
@@ -37,9 +39,12 @@ MODE_LABELS = {
     "all": "all 视频+音频",
     "v": "v   仅视频",
     "a": "a   仅音频",
+    "s": "s   仅字幕 (SRT)",
 }
 
-VALID_MODES = ("all", "v", "a")
+VALID_MODES = tuple(MODE_LABELS)
+
+CONTENT_API_TIMEOUT = 15.0
 
 # Default timeout for Bilibili login/session API requests. The nav probe
 # degrades to local validation; renewal failures preserve the current session.

@@ -6,6 +6,7 @@ import gzip
 import json
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Optional
 
 import pytest
@@ -21,6 +22,9 @@ class _Response:
 
     def read(self) -> bytes:
         return self.body
+
+    def geturl(self) -> str:
+        return "https://www.bilibili.com/video/BV1Got26ZE5K/?p=2"
 
     def __enter__(self) -> _Response:
         return self
@@ -180,3 +184,38 @@ def test_fetch_text_rejects_invalid_gzip_as_bad_data() -> None:
 
     assert result is None
     assert failure == transport.HttpFailure("bad_data")
+
+
+def test_load_cookie_jar_failure_is_safe_and_does_not_create_a_file(tmp_path: Path) -> None:
+    path = tmp_path / "missing.txt"
+    jar, error = transport.load_cookie_jar(path)
+    assert jar is None and error == "无法读取现有 Cookie"
+    assert not path.exists()
+
+
+def test_resolve_share_url_keeps_query_without_reading_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(_Response, "read", lambda self: pytest.fail("Must not read video HTML"))
+    url, failure = transport.resolve_url(_Opener(), "https://b23.tv/example", 15)
+    assert url == "https://www.bilibili.com/video/BV1Got26ZE5K/?p=2"
+    assert failure is None
+
+
+@pytest.mark.parametrize(
+    "exception,expected",
+    [
+        (urllib.error.URLError("secret"), transport.HttpFailure("network")),
+        (
+            urllib.error.HTTPError("https://b23.tv/example", 412, "secret", {}, None),
+            transport.HttpFailure("http", 412),
+        ),
+    ],
+)
+def test_resolve_share_url_returns_safe_failures(
+    exception: Exception, expected: transport.HttpFailure
+) -> None:
+    url, failure = transport.resolve_url(_Opener(error=exception), "https://b23.tv/example", 15)
+    assert url is None
+    assert failure == expected
+    assert "secret" not in failure.describe()

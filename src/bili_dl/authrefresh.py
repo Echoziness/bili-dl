@@ -89,15 +89,6 @@ def crypto_available() -> bool:
     return True
 
 
-def _load_jar(cookie_path: Path) -> tuple[Optional[http.cookiejar.MozillaCookieJar], Optional[str]]:
-    jar = http.cookiejar.MozillaCookieJar(str(cookie_path))
-    try:
-        jar.load(ignore_discard=True, ignore_expires=True)
-    except (OSError, http.cookiejar.LoadError):
-        return None, "无法读取现有 Cookie"
-    return jar, None
-
-
 def _cookie_value(jar: http.cookiejar.CookieJar, name: str) -> Optional[str]:
     for cookie in jar:
         domain = cookie.domain.lstrip(".").lower()
@@ -173,7 +164,7 @@ def _refresh_csrf(
 
 def _renewal_requirement(cookie_path: Path, *, proxy: Optional[str] = None) -> RenewalRequirement:
     """Ask Bilibili whether it currently requests a Web-session refresh."""
-    jar, error = _load_jar(cookie_path)
+    jar, error = transport.load_cookie_jar(cookie_path)
     if jar is None:
         return RenewalRequirement(error=error)
     opener = transport.cookie_opener(jar, proxy)
@@ -300,7 +291,7 @@ def confirm_pending(
     cookie_path: Path, old_refresh_token: str, *, proxy: Optional[str] = None
 ) -> Optional[str]:
     """Retry a previously persisted old-token confirmation."""
-    jar, error = _load_jar(cookie_path)
+    jar, error = transport.load_cookie_jar(cookie_path)
     if jar is None:
         return error
     opener = transport.cookie_opener(jar, proxy)

@@ -9,7 +9,7 @@ simple and dependency-free.
 
 Config file schema (all fields optional)::
 
-    mode = "all"          # "all" | "v" | "a"
+    mode = "all"          # "all" | "v" | "a" | "s"
     proxy = "http://..."
     insecure = false
     video_dir = "/path"

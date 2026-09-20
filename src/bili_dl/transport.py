@@ -1,6 +1,6 @@
-"""Shared HTTP transport for Bilibili authentication and session APIs.
+"""Shared HTTP transport for Bilibili authentication and content APIs.
 
-All Web-session modules use this boundary for browser headers, proxy
+Web-session and content modules use this boundary for browser headers, proxy
 selection, timeouts, decoding, and structured failures.  ``proxy=None``
 honours urllib's environment defaults; ``proxy=""`` explicitly disables
 environment proxies; any non-empty value is used for both HTTP and HTTPS.
@@ -15,6 +15,7 @@ import urllib.error
 import urllib.request
 import zlib
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Optional
 
 from .config import AUTH_API_TIMEOUT, REFERER, USER_AGENT
@@ -60,6 +61,31 @@ def cookie_opener(
     if jar is not None:
         handlers.append(urllib.request.HTTPCookieProcessor(jar))
     return urllib.request.build_opener(*handlers)
+
+
+def load_cookie_jar(
+    cookie_path: Path,
+) -> tuple[Optional[http.cookiejar.MozillaCookieJar], Optional[str]]:
+    """Load the existing session for content requests and session renewal."""
+    jar = http.cookiejar.MozillaCookieJar(str(cookie_path))
+    try:
+        jar.load(ignore_discard=True, ignore_expires=True)
+    except (OSError, http.cookiejar.LoadError):
+        return None, "无法读取现有 Cookie"
+    return jar, None
+
+
+def resolve_url(
+    opener: urllib.request.OpenerDirector, url: str, timeout: float
+) -> tuple[Optional[str], Optional[HttpFailure]]:
+    """Resolve a share-link redirect without downloading the response body."""
+    try:
+        with opener.open(request(url), timeout=timeout) as response:
+            return str(response.geturl()), None
+    except urllib.error.HTTPError as exc:
+        return None, HttpFailure("http", exc.code)
+    except (urllib.error.URLError, OSError):
+        return None, HttpFailure("network")
 
 
 def _decode_body(
