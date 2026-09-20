@@ -350,34 +350,7 @@ uv run python -m build
 - **SSH 22 端口被封，走 443**：`git push` 实测 `ssh: connect to host github.com port 22: Connection refused`。解法：`git remote set-url origin ssh://git@ssh.github.com:443/Echoziness/bili-dl.git`，首次 push 用 `GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=accept-new"` 登记 `ssh.github.com:443` 的 host key（ED25519）。此 remote URL 已固化在本地仓库，后续 push 无需再处理。不改全局 config，避免影响其他仓库。
 - **PowerShell 编码**：PowerShell 调子进程时需注入 `chcp 65001` + UTF8，但纯 Python 跨平台版不涉及此（Python3 默认 UTF-8）。此条仅对 bd.ps1 维护有意义。
 
-## 7. 发布 checklist
-
-- [x] 替换 `pyproject.toml` 中 `authors`、`project.urls` 占位（handle=Echoziness，邮箱用 GitHub noreply）
-- [x] GitHub Actions CI（lint + test 三平台矩阵）已配置
-- [x] PyPI 自动发布（`.github/workflows/publish.yml` — push `v*` tag 触发 Trusted Publisher 构建上传）
-- [x] 首发 v0.1.0 / v0.1.1 / v0.1.2 已发布
-- [x] v0.1.3 已发布（2026-06-28）
-- [x] v0.1.4 已发布（2026-06-28）
-- [x] v0.1.5 已发布（2026-06-28）
-- [x] v0.1.6 已发布（2026-06-28）
-- [x] v0.1.7 已发布（2026-06-28）
-- [x] v0.1.8 已发布（2026-06-28）
-- [x] v0.1.9 已发布（2026-06-28）
-- [x] v0.2.0 已发布（2026-06-28）
-- [x] v0.2.1 已发布（2026-06-28）
-- [x] v0.2.2 已发布（2026-06-28）
-- [x] v0.2.3 已发布（2026-06-28）
-- [x] v0.2.4 已发布（2026-06-28）
-- [x] v0.2.5 已发布（2026-06-28）
-- [x] v0.2.6 已发布（2026-06-28）
-- [x] v0.2.7 已发布（2026-06-28）
-- [x] v0.2.8 已发布（2026-06-28）
-- [x] v0.2.9 已发布（2026-06-28）
-- [x] v0.3.0 已发布（2026-08-14）
-- [x] v0.4.0 已发布（2026-09-11）
-- [x] v0.4.1 已发布（2026-09-19）
-
-### 发版流程（当前）
+## 7. 发版流程（当前）
 > 任何一步不绿不得进入下一步。
 
 1. 改版本号：仅 `src/bili_dl/__init__.py`（`pyproject.toml` 用 hatchling `dynamic = ["version"]` 自动读取）
