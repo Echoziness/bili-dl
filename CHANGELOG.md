@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-09-21
+
+### Fixed
+
+- The `--full` flag's help text was unusable on Python 3.14: argparse started
+  validating `%`-sequences in help strings at `add_argument` time, and the
+  literal "~5%" text was parsed as a bad octal format specifier, crashing the
+  `comments`/`replies` commands on startup. Help text no longer uses literal
+  `%`. A regression test formats every parser's help so all supported Python
+  versions catch this class of bug.
+- CI test matrix now includes Python 3.14 on Ubuntu (single extra job), closing
+  the version-behavior blind spot for newest-Python-only checks with minimal CI
+  cost.
+
 ## [0.4.4] - 2026-09-21
 
 ### Changed
@@ -25,7 +39,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `--full` flag on `comments`/`replies` keeps the raw Bilibili comment objects
   (embedded child reply previews are still removed in both modes).
-
 
 ## [0.4.3] - 2026-09-21
 

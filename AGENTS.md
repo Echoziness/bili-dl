@@ -242,6 +242,12 @@
 - **白名单**：`rpid_str`/`root_str`/`parent_str`（回复树）、`ctime`+`time`（epoch + 本机时区可读串）、`like`/`rcount`、`member.{mid,uname,level?,official?}`、`content.{message,pictures?（仅 img_src）}`；条件键 `pinned`（comments.py 按 pinned_ids 内联注入，仅 lean）、`up_liked`、`location`（IP 属地）。`_relation_id`/`_non_negative_int` 宽容降级（垃圾值→"0"/0），身份字段（rpid）仍严格。
 - **逃生门**：`--full` 保留原始对象（仍剔除内嵌 replies 预览）；`CommentConfig.full` 贯穿 cli → comments → CommentClient。header 恒为 `schema_version: 2` 且 `request.fields` 记 `"lean"|"full"`。
 - **测试锚定**：`test_lean_projection_keeps_reading_fields_and_drops_protocol_noise`（键集合精确断言 + 噪声 URL 不出现）、`test_full_mode_preserves_raw_objects`、`test_pinned_flag_is_inline_in_lean_but_not_in_full`；原子写入测试的 fail_write hook 以 `rpid_str` 识别记录行。
+
+### 2.32 argparse help 中裸 `%` 只在 Python 3.14 提前爆炸（v0.4.4 踩坑）
+- **现象**：`--full` 的 help 写 `~5% of the size`；CI（3.11/3.13）全绿，用户 miniforge Python **3.14** 启动即崩 `ValueError: badly formed help string`（`%o format: an integer is required, not dict`）。
+- **根因**：argparse 对每个 help 字符串做 `help % params` 插值。Python 3.14 把校验从 format 阶段提前到 `add_argument` 的 `_check_help`；旧版本只在打印 help 时才炸。版本矩阵 3.11/3.13 因此测不到。
+- **解法**：help 文本不用 `%`（改写措辞），如需字面 `%` 用 `%%` 转义。回归测试 `test_every_parser_formats_help_without_crashing` 对 `_build_parser`/`_build_comments_parser`/`_build_replies_parser` 调 `format_help()`——`format_help` 必然触发 `_expand_help`，任何版本都会暴露。
+- **教训**："help 文本即格式串"。CI 矩阵没覆盖最新 Python 版本时，差异点往往就在这类版本行为变更上（3.14 的 early `_check_help`）。`ci.yml` 已用 `matrix.include` 以最小代价补 **3.14**（ubuntu 单 job，见 §2.16 的版本数权衡）。
 - 原子文件事务覆盖头部、正文、替换及 Ctrl+C；失败不覆盖旧文件，当前临时数据丢弃，暂不支持续传。错误不得暴露响应正文或签名 URL。
 
 ## 3. 项目结构

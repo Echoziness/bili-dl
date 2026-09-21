@@ -225,7 +225,7 @@ def _add_comment_options(parser: argparse.ArgumentParser, *, thread: bool) -> No
     parser.add_argument(
         "--full",
         action="store_true",
-        help="save raw Bilibili comment objects (default: lean reading fields, ~5% of the size)",
+        help="save raw Bilibili comment objects (default: lean reading fields)",
     )
     parser.add_argument(
         "--output-dir",

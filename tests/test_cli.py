@@ -28,6 +28,15 @@ def test_default_mode_is_none() -> None:
     assert args.url is None
 
 
+def test_every_parser_formats_help_without_crashing() -> None:
+    # argparse interpolates help strings with params at format time; a bare "%"
+    # (e.g. "~5% of the size") raises "badly formed help string" on formats and,
+    # since Python 3.14, even at add_argument time. Regression for that release.
+    for builder in (cli._build_parser, cli._build_comments_parser, cli._build_replies_parser):
+        text = builder().format_help()
+        assert "usage" in text
+
+
 def test_video_mode() -> None:
     assert _parse("-v", "https://bilibili.com/video/BV123").mode == "v"
 

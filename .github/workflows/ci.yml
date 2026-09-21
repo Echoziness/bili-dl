@@ -26,6 +26,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.11", "3.13"]
+        # Version-behavior regressions (e.g. argparse _check_help in 3.14) hit
+        # newest-only code paths; one extra job costs little and catches them.
+        include: [{os: ubuntu-latest, python-version: "3.14"}]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
