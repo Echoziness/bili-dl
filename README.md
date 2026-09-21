@@ -1,6 +1,6 @@
 # bili-dl
 
-> Cross-platform Bilibili video, audio and subtitle downloader.
+> Cross-platform Bilibili video, audio, subtitle and comment downloader.
 
 [![CI](https://github.com/Echoziness/bili-dl/actions/workflows/ci.yml/badge.svg)](https://github.com/Echoziness/bili-dl/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
@@ -29,10 +29,13 @@ automatic session renewal, and foobar2000-friendly audio output.
 - **Timestamped subtitles** — `-s` saves the first subtitle track returned by
   Bilibili as a UTF-8 SRT file, with each cue's start and end timestamps. It reuses
   your login and proxy without downloading media or requiring yt-dlp/ffmpeg.
+- **Structured comments** — download all API-visible main comments or one complete
+  reply thread as UTF-8 JSON. Optional limits stop after an exact number of unique
+  comments; no browser, yt-dlp or ffmpeg is required.
 
 ## Install
 
-Video/audio downloads use `yt-dlp` and `ffmpeg` on your `PATH`. Subtitle-only
+Video/audio downloads use `yt-dlp` and `ffmpeg` on your `PATH`. Subtitle/comment
 downloads and login work with just `bili-dl` installed:
 
 ```bash
@@ -128,6 +131,8 @@ bili-dl -v https://www.bilibili.com/video/BV...  # video only
 bili-dl -s https://www.bilibili.com/video/BV...  # subtitle only (SRT)
 bili-dl --batch-file urls.txt                  # batch: download all URLs in file
 bili-dl --status                               # inspect login / renewal status
+bili-dl comments BV... --limit 100             # first 100 main comments
+bili-dl replies BV... ROOT_ID                  # one complete reply thread
 ```
 
 | OS | Videos | Audio |
@@ -162,6 +167,60 @@ times with millisecond precision. No video or audio file is downloaded. A missin
 subtitle or a failed request returns a failure status; an existing SRT is only
 replaced after the new file is fully written. Subtitle requests always verify
 TLS certificates; `-k` applies only to yt-dlp media downloads.
+
+### Comments
+
+```bash
+# All API-visible main comments, newest first (default)
+bili-dl comments "https://www.bilibili.com/video/BV.../"
+
+# At most the first 100 main comments
+bili-dl comments BV... --limit 100
+
+# Bilibili's hot order (session-bound and always fetched sequentially)
+bili-dl comments BV... --sort hot --limit 100
+
+# One root comment and all of its child replies
+bili-dl replies BV... 317745878352
+
+# At most 50 objects in the thread, including the root comment itself
+bili-dl replies BV... 317745878352 --limit 50
+```
+
+Both commands reuse the normal login, automatic renewal, proxy, `cookie_dir`
+and `video_dir` settings. `--output-dir` overrides the destination. They do not
+invoke yt-dlp or ffmpeg. Regular BV/AV URLs, bare identifiers and `b23.tv`
+short links are supported.
+
+Main comments default to `newest`. Pinned comments come first and count toward
+the limit; subsequent comments follow the selected server order. Observed hot
+pages can return an unchanged offset while their contents advance. Its server-side
+mechanism is not confirmed, so hot pages are fetched sequentially in one session
+and cannot be resumed from the offset alone. A transport failure in hot mode stops
+the download: replaying an ambiguously completed request could skip a page.
+Newest and numbered thread requests retry transient network/429/5xx failures
+within a fixed budget. A rejected WBI signature refreshes its keys once per page.
+
+Output is an atomic UTF-8 JSON document containing video metadata, the request,
+Bilibili comment objects and a final result summary. Embedded child `replies`
+previews are removed so the saved records obey the limit; content, images, emotes,
+author information and reply relationships are retained. IDs have a canonical
+`rpid_str` string for consumers that cannot represent large integers. Main-comment files are
+named `title [BV…].comments.json` (or `.comments.hot.json`); reply threads are
+named `title [BV…].comment-ROOT_ID.json`. An existing file is replaced only after
+the new document is complete. `result.complete` means the main API signalled its
+end, or a thread returned an empty page. A count or short thread page alone does
+not prove completion. If the limit stops traversal before this evidence,
+`stopped_reason` is `limit` and `complete` is false. Failures and Ctrl+C preserve
+the previous file and discard this run's temporary output; Ctrl+C exits with 130.
+Downloads do not currently resume. Start/finish timestamps and the first/last
+reported totals are included so consumers can recognize a live snapshot.
+
+Bilibili's main-comment total may include child replies; it is not a reliable
+denominator for the number of main comments. Counts also change during downloads
+and visibility can differ. “All” means all comments enumerated for the current
+account during that run. Reported totals and saved-record counts are kept separate,
+and the CLI shows actual records/pages rather than a misleading percentage.
 
 ### Config file
 
@@ -203,6 +262,14 @@ bili-dl --batch-file urls.txt
 
 ### CLI reference
 
+| Command | Description |
+|---------|-------------|
+| `bili-dl comments URL` | download all API-visible main comments as JSON |
+| `bili-dl comments URL --limit N` | save at most N unique main comments |
+| `bili-dl comments URL --sort hot` | use Bilibili's session-bound hot order |
+| `bili-dl replies URL ROOT_ID` | download the root and all child replies |
+| `bili-dl replies URL ROOT_ID --limit N` | cap the thread at N objects including its root |
+
 | Flag | Description |
 |------|-------------|
 | `--all` | video + audio, merged MP4 + extracted M4A (default) |
@@ -225,8 +292,9 @@ bili-dl --batch-file urls.txt
   memory — never written to disk or sent anywhere.
 - `bili-dl login` and its renewal check communicate only with Bilibili's
   login, session-check, and renewal endpoints; they do not access any browser
-  profile or send data to a third party. Downloads contact the URLs you
-  provide through `yt-dlp`. No telemetry or analytics.
+  profile or send data to a third party. Media downloads contact the URLs you
+  provide through `yt-dlp`; subtitle and comment commands call only Bilibili
+  content/CDN endpoints. No telemetry or analytics.
 - Browser-imported cookies are backed up before replacement. QR-login cookies
   replace the destination atomically, but only after an online Bilibili
   session check succeeds; a failed check leaves the prior file untouched.
@@ -266,6 +334,10 @@ If you enabled CFA and downloads fail after the video is written:
   each part's URL separately (or list them in a `--batch-file`).
 - **Batch downloads are sequential** — no concurrency. A long URL list takes
   proportionally longer; this keeps memory low and avoids hammering Bilibili.
+- **Comment snapshots are live and account-visible** — totals may change while a
+  run is in progress, and deleted/moderated comments may be counted by Bilibili
+  without being enumerable. Hot-order pagination cannot be resumed from its
+  offset alone, so an interrupted hot download starts over.
 - **Re-downloading overwrites** — no `--no-overwrites` / `--continue` is
   passed to yt-dlp. Running the same URL twice re-downloads and replaces the
   file.

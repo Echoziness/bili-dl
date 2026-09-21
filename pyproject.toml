@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "bili-dl"
 dynamic = ["version"]
-description = "Cross-platform Bilibili video/audio downloader built on yt-dlp + ffmpeg."
+description = "Cross-platform Bilibili video, audio, subtitle and comment downloader."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"

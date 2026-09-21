@@ -6,6 +6,8 @@ from __future__ import annotations
 NAV_API = "https://api.bilibili.com/x/web-interface/nav"
 VIDEO_INFO_API = "https://api.bilibili.com/x/web-interface/view"
 PLAYER_INFO_API = "https://api.bilibili.com/x/player/wbi/v2"
+COMMENT_MAIN_API = "https://api.bilibili.com/x/v2/reply/wbi/main"
+COMMENT_REPLY_API = "https://api.bilibili.com/x/v2/reply/reply"
 REFERER = "https://www.bilibili.com"
 QR_GENERATE_API = "https://passport.bilibili.com/x/passport-login/web/qrcode/generate"
 QR_POLL_API = "https://passport.bilibili.com/x/passport-login/web/qrcode/poll"
@@ -45,6 +47,11 @@ MODE_LABELS = {
 VALID_MODES = tuple(MODE_LABELS)
 
 CONTENT_API_TIMEOUT = 15.0
+
+# Comment downloads may span thousands of pages. Keep requests sequential and
+# gently paced; retry only transient transport failures within the module.
+COMMENT_PAGE_DELAY = 0.3
+COMMENT_RETRY_DELAYS = (0.5, 1.0)
 
 # Default timeout for Bilibili login/session API requests. The nav probe
 # degrades to local validation; renewal failures preserve the current session.

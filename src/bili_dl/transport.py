@@ -9,6 +9,7 @@ environment proxies; any non-empty value is used for both HTTP and HTTPS.
 from __future__ import annotations
 
 import gzip
+import http.client
 import http.cookiejar
 import json
 import urllib.error
@@ -100,7 +101,10 @@ def _decode_body(
             return None, HttpFailure("bad_data")
     elif encoding not in {"", "identity"}:
         return None, HttpFailure("bad_data")
-    return body.decode("utf-8", errors="replace"), None
+    try:
+        return body.decode("utf-8"), None
+    except UnicodeDecodeError:
+        return None, HttpFailure("bad_data")
 
 
 def fetch_json(
@@ -115,7 +119,7 @@ def fetch_json(
             content_encoding = response.headers.get("Content-Encoding")
     except urllib.error.HTTPError as exc:
         return None, HttpFailure("http", exc.code)
-    except (urllib.error.URLError, OSError):
+    except (urllib.error.URLError, OSError, http.client.HTTPException):
         return None, HttpFailure("network")
     body, failure = _decode_body(raw, content_encoding)
     if body is None:
@@ -141,6 +145,6 @@ def fetch_text(
             content_encoding = response.headers.get("Content-Encoding")
     except urllib.error.HTTPError as exc:
         return None, HttpFailure("http", exc.code)
-    except (urllib.error.URLError, OSError):
+    except (urllib.error.URLError, OSError, http.client.HTTPException):
         return None, HttpFailure("network")
     return _decode_body(raw, content_encoding)

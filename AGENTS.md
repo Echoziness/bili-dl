@@ -225,6 +225,18 @@
 - **解法**：两个 yt-dlp 子进程都接收父环境的副本，但显式移除 `PYTHONHOME`，让外部可执行文件使用自身解释器与标准库。保留 `PATH`、代理及其他用户环境；不全局修改当前进程，也不影响原生 ffmpeg。
 - **测试锚定**：`tests/test_downloader.py::test_download_does_not_leak_pythonhome_to_external_ytdlp` 断言两个阶段均移除 `PYTHONHOME` 且保留无关环境变量；真实 `uv run` 预测调用已验证成功。
 
+### 2.29 WBI 签名边界
+- `wbi.py` 只负责从 `nav` 响应提取并校验 `wbi_img` 密钥、生成 mixin key 和签名参数；HTTP 必须继续复用 `transport`，评论分页与存储不得塞入该模块。
+- 签名参数按 key 排序，值先移除 `!'()*`，编码必须使用 `encodeURIComponent` 等价语义（空格为 `%20`，不能使用 `quote_plus` 生成 `+`）。`sign()` 返回新字典且覆盖外部传入的旧 `wts/w_rid`，不得修改调用方参数。
+- WBI 密钥来自 `https://*.hdslb.com/.../<32位十六进制 key>.<扩展名>`；包括 URL 解析异常在内的协议异常归一为不含正文的 `HttpFailure("bad_data")`。`CommentClient` 管理任务内密钥，`-403` 每页最多重取一次，不做持久缓存；签名是字符串置换，不得擅自改变 key 大小写。
+
+### 2.30 评论分页与“全部”的语义
+- 主评论使用签名接口 `/x/v2/reply/wbi/main`；默认 `newest`（mode=2），`hot`（mode=3）显式选择。2026-09 实测 hot 连续页可返回相同 `next_offset/session_id` 却推进不同内容；服务端机制尚未确认，保守地使用同一 opener 串行请求，不宣称 offset 可恢复。hot 传输失败不自动重放，以防服务端已推进而客户端漏页；newest 和数字页码允许有限重试。
+- 楼中楼使用 `/x/v2/reply/reply` 的 `root + pn + ps`；上限包含根评论。主评论以布尔 `is_end`、楼中楼以空页确认结束；短页、动态 count 不作为楼中楼完整性的证据。无新增 ID/循环游标是失败而非完整成功。
+- 主评论 `all_count` 可能包含子回复，不能作为主评论完成百分比的分母。JSON 分别记录实际条数、首末统计和抓取时间；“全部”表示本次运行中 API 可枚举的全部内容，不是静态快照。
+- `commentapi.py` 负责传输重试、WBI 生命周期及页码/列表/归属校验，`comments.py` 统一去重、上限、进度、文件事务。保存对象去掉内嵌 `replies` 预览以保证条数语义，正文/图片/表情/回复关系保留；只将 ID 集合留在内存。
+- 原子文件事务覆盖头部、正文、替换及 Ctrl+C；失败不覆盖旧文件，当前临时数据丢弃，暂不支持续传。错误不得暴露响应正文或签名 URL。
+
 ## 3. 项目结构
 
 ```
@@ -248,6 +260,10 @@ bili-dl/
 │   ├── authqr.py                   # 独立 B 站 Web 扫码登录协议（纯逻辑，无 ui）
 │   ├── authrefresh.py              # B 站 Web Cookie 每日检查/续期协议（纯逻辑，无 ui）
 │   ├── transport.py                # B 站认证 HTTP 统一边界（请求头/代理/超时/安全错误）
+│   ├── video.py                    # BV/AV/短链解析 + 共享视频元数据 + 安全文件名
+│   ├── wbi.py                      # nav 密钥提取 + WBI 参数签名
+│   ├── comments.py                 # 主评论/楼中楼串行分页 + 原子流式 JSON
+│   ├── commentapi.py               # 评论协议校验 + 任务内 WBI + 重试语义
 │   ├── cookiesource.py            # Cookie 源文件检测 + 提取导入（纯逻辑，无 ui）
 │   ├── cookiestore.py             # Cookie 校验 + ensure_cookie 编排（纯逻辑，无 ui）
 │   ├── ffmpeg.py                  # ffprobe/ffmpeg 探测 + 零损失重封装/提取（纯逻辑，无 ui）
@@ -266,6 +282,8 @@ bili-dl/
 │   ├── test_downloader.py         # 统一入口分发与目录准备
 │   ├── test_media.py              # 参数拼装 + download() mock subprocess
 │   ├── test_subtitles.py          # 首轨选择、时间戳、原子写入与 CLI 集成
+│   ├── test_wbi.py                # 固定向量、URL 校验与安全失败
+│   ├── test_comments.py           # 分页/去重/上限/重试/原子 JSON 与 CLI
 │   ├── test_ffmpeg.py             # repair/extract mock subprocess 全分支
 │   ├── test_cli.py                # argparse parser + config 合并 + 批量下载 + main() mock
 │   ├── test_ui.py                 # _init TTY + colorize ANSI
@@ -312,6 +330,8 @@ bili-dl/
 
 字幕模式使用 `-s/--subtitle`、REPL `s` 或配置 `mode = "s"`，共用 `video_dir/--output-dir`。只取 API 返回的第一条字幕轨，不排序、不尝试后续轨，不做 ASR；保留逐句起止时间并原子写入 UTF-8 SRT。普通投稿链接的 `?p=N` 指定分 P，默认 P1。字幕 HTTP 复用 `transport`，CookieJar 加载由 `transport.load_cookie_jar` 统一提供；短链接与字幕 CDN 请求不携带登录 Cookie，TLS 始终校验。历史章节中的 yt-dlp 实现及测试位置现分别为 `media.py` / `test_media.py`。
 
+评论使用独立子命令：`comments URL [--sort newest|hot] [--limit N]` 与 `replies URL ROOT_ID [--limit N]`。默认不限量，输出 UTF-8 JSON 到 `video_dir/--output-dir`；楼中楼上限包含主评论。无需 yt-dlp/ffmpeg。
+
 ```bash
 # 开发环境（一键装齐项目 + dev 工具到 .venv）
 uv sync --default-index "https://mirrors.aliyun.com/pypi/simple/"  # 国内网络用镜像
@@ -326,6 +346,8 @@ uv run pytest -q
 bili-dl https://www.bilibili.com/video/BVxxxxx
 bili-dl -a https://www.bilibili.com/video/BVxxxxx   # 验证音频 faststart
 uv run bili-dl -s https://www.bilibili.com/video/BV1Got26ZE5K/ --output-dir output/subtitle-smoke
+uv run bili-dl comments https://www.bilibili.com/video/BV1Got26ZE5K/ --limit 40 --output-dir output/comment-smoke
+uv run bili-dl replies https://www.bilibili.com/video/BV1cSec6tEux/ 317745878352 --limit 40 --output-dir output/comment-smoke
 
 # 独立扫码登录 / 只读会话状态
 uv run bili-dl login

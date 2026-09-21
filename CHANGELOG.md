@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-09-21
+
+### Added
+
+- `bili-dl comments URL` downloads API-visible main comments to atomic UTF-8
+  JSON. It defaults to newest order, supports the website-style
+  session-bound hot order with `--sort hot`, and accepts `--limit N` for an exact
+  cap on unique comments.
+- `bili-dl replies URL ROOT_ID` downloads a root comment and its child replies;
+  the default is the complete visible thread, while `--limit N` includes the root
+  in the requested count.
+- Native WBI key extraction and signing, including strict key-source validation,
+  JavaScript-compatible query encoding, key refresh after signature rejection,
+  bounded transient retries and sequential request pacing.
+
+### Changed
+
+- Moved BV/AV, short-link and video-metadata resolution into a shared content
+  boundary used by subtitles and comments. Comment commands reuse the existing
+  Cookie, automatic-renewal, proxy, config and video-output settings without
+  requiring yt-dlp or ffmpeg.
+- Comment JSON is streamed to a same-directory temporary file and atomically
+  published only after a successful run. Result metadata distinguishes the
+  API-reported total from the actually enumerable count and records whether the
+  run reached the end or stopped at the requested limit.
+
+### Tests
+
+- Added fixed WBI vectors plus pagination, deduplication, pinned-comment, limit,
+  retry, key-refresh, atomic-output, error-privacy and CLI coverage. Live smoke
+  tests exercised newest/hot main pages and a multi-page reply thread without a
+  browser.
+
+### Fixed
+
+- Remove embedded reply previews from comment records so root-only and limited
+  downloads cannot silently include extra child comment bodies. Validate page
+  numbers, root ownership, cursor flags and list types before saving.
+- Confirm thread completion with an empty page instead of trusting mutable
+  counters. Do not replay failed hot-order requests whose server-side progress
+  is unknown; refresh signatures on safe retries and detect cursor cycles.
+- Cover header writing, record writing, replacement and cancellation with one
+  atomic file transaction. Ctrl+C returns 130; failed runs preserve old output.
+- Split comment protocol handling from a shared download loop, reuse video API
+  response handling for subtitles, and report actual progress without treating
+  API totals (which may include children) as main-comment totals.
+- Treat truncated HTTP bodies and malformed UTF-8 as safe transport failures;
+  malformed WBI/video URLs no longer escape the safe error boundary.
+
 ## [0.4.2] - 2026-09-20
 
 ### Added
@@ -560,7 +609,9 @@ the system *larger* without making it *simpler*.
 - `--version` is now exposed as `-V` (capital), since `-v` is taken by
   `--video`. Matches yt-dlp / curl / pip convention.
 
-[Unreleased]: https://github.com/Echoziness/bili-dl/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/Echoziness/bili-dl/compare/v0.4.3...HEAD
+[0.4.3]: https://github.com/Echoziness/bili-dl/compare/v0.4.2...v0.4.3
+[0.4.2]: https://github.com/Echoziness/bili-dl/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/Echoziness/bili-dl/compare/v0.4.0...v0.4.1
 [0.1.0]: https://github.com/Echoziness/bili-dl/releases/tag/v0.1.0
 [0.1.1]: https://github.com/Echoziness/bili-dl/releases/tag/v0.1.1

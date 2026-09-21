@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from . import __version__, authqr, authrefresh, cookiestore, downloader, settings, ui
+from . import __version__, authqr, authrefresh, comments, cookiestore, downloader, settings, ui
 from . import ffmpeg as ff
 from .config import VALID_MODES
 from .downloader import DownloadConfig
@@ -72,16 +72,47 @@ examples:
   bili-dl --batch-file urls.txt                    # batch download
   bili-dl --status                                 # inspect login and renewal state
   bili-dl login                                    # QR login
+  bili-dl comments URL [--limit N]                 # main comments (all by default)
+  bili-dl replies URL ROOT_ID [--limit N]          # one thread, including its root
   bili-dl                                          # interactive REPL
 
 report issues: https://github.com/Echoziness/bili-dl/issues\
 """
 
 
+def _add_session_options(p: argparse.ArgumentParser) -> None:
+    """Keep login, content and media flags on the same configuration contract."""
+    p.add_argument(
+        "--cookie-dir",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help=f"override cookie directory (default: {config_dir()})",
+    )
+    p.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        metavar="FILE",
+        help=f"override config file path (default: {config_file_path()})",
+    )
+    p.add_argument(
+        "--proxy",
+        default=None,
+        metavar="URL",
+        help="proxy URL for downloads and Bilibili APIs (env: HTTP_PROXY, HTTPS_PROXY)",
+    )
+    p.add_argument(
+        "--no-color",
+        action="store_true",
+        help="disable colored output (also disabled by NO_COLOR env var or non-TTY)",
+    )
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="bili-dl",
-        description="Cross-platform Bilibili video, audio and subtitle downloader.",
+        description="Cross-platform Bilibili video, audio, subtitle and comment downloader.",
         epilog=_HELP_EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -128,24 +159,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="skip yt-dlp TLS verification; authentication APIs stay verified",
     )
-    p.add_argument(
-        "--no-color",
-        action="store_true",
-        help="disable colored output (also disabled by NO_COLOR env var or non-TTY)",
-    )
-    p.add_argument(
-        "--proxy",
-        default=None,
-        metavar="URL",
-        help="proxy URL for downloads and Bilibili APIs (env: HTTP_PROXY, HTTPS_PROXY)",
-    )
-    p.add_argument(
-        "--cookie-dir",
-        type=Path,
-        default=None,
-        metavar="DIR",
-        help=f"override cookie directory (default: {config_dir()})",
-    )
+    _add_session_options(p)
     p.add_argument(
         "--output-dir",
         type=Path,
@@ -159,13 +173,6 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="DIR",
         help="override audio output directory",
-    )
-    p.add_argument(
-        "--config",
-        type=Path,
-        default=None,
-        metavar="FILE",
-        help=f"override config file path (default: {config_file_path()})",
     )
     p.add_argument(
         "--batch-file",
@@ -189,28 +196,67 @@ def _build_login_parser() -> argparse.ArgumentParser:
         prog="bili-dl login",
         description="Use the Bilibili App to create a standalone QR-login session.",
     )
-    p.add_argument(
-        "--cookie-dir",
+    _add_session_options(p)
+    return p
+
+
+def _positive_int(value: str) -> int:
+    try:
+        number = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("must be a positive integer") from None
+    if number < 1:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return number
+
+
+def _add_comment_options(parser: argparse.ArgumentParser, *, thread: bool) -> None:
+    parser.add_argument(
+        "--limit",
+        type=_positive_int,
+        default=None,
+        metavar="N",
+        help=(
+            "maximum objects to save, including the root; default: all"
+            if thread
+            else "maximum main comments to save; default: all"
+        ),
+    )
+    parser.add_argument(
+        "--output-dir",
         type=Path,
         default=None,
         metavar="DIR",
-        help=f"override cookie directory (default: {config_dir()})",
+        help="override comment output directory (default: video directory)",
     )
-    p.add_argument(
-        "--config",
-        type=Path,
-        default=None,
-        metavar="FILE",
-        help=f"override config file path (default: {config_file_path()})",
+    _add_session_options(parser)
+
+
+def _build_comments_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="bili-dl comments",
+        description="Download main comments as UTF-8 JSON (newest order by default).",
     )
-    p.add_argument(
-        "--proxy",
-        default=None,
-        metavar="URL",
-        help="proxy URL for Bilibili APIs (env: HTTP_PROXY, HTTPS_PROXY)",
+    parser.add_argument("url", help="Bilibili video URL, BV number or av number")
+    parser.add_argument(
+        "--sort",
+        choices=("newest", "hot"),
+        default="newest",
+        help="comment order; hot pagination is session-bound (default: newest)",
     )
-    p.add_argument("--no-color", action="store_true", help="disable colored output")
-    return p
+    _add_comment_options(parser, thread=False)
+    return parser
+
+
+def _build_replies_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="bili-dl replies",
+        description="Download one root comment and all child replies as UTF-8 JSON.",
+    )
+    parser.add_argument("url", help="Bilibili video URL, BV number or av number")
+    parser.add_argument("root_id", type=_positive_int, help="root comment ID from main comments")
+    _add_comment_options(parser, thread=True)
+    return parser
 
 
 def _load_settings(config_path: Optional[Path]) -> settings.Settings:
@@ -337,6 +383,49 @@ def _login_command(argv: list[str]) -> int:
     return 0 if stored.success else 1
 
 
+def _comment_command(argv: list[str], *, thread: bool) -> int:
+    """Run one non-interactive main-comment or thread download."""
+    parser = _build_replies_parser() if thread else _build_comments_parser()
+    args = parser.parse_args(argv)
+    if args.no_color:
+        ui.disable_color()
+    cfg = _load_settings(args.config)
+    cookie_dir = args.cookie_dir or cfg.cookie_dir
+    output_dir = args.output_dir or cfg.video_dir or default_video_dir()
+    proxy = _resolve_proxy(args.proxy, cfg.proxy)
+    try:
+        ensure_dir(cookie_dir or config_dir())
+        ensure_dir(output_dir)
+    except OSError as exc:
+        ui.error(f"[错误] 无法创建评论目录: {exc}")
+        return 1
+    opts = Options(proxy=proxy, cookie_dir=cookie_dir, video_dir=output_dir)
+    if not _prepare_cookie(opts):
+        return 1
+
+    def progress(pages: int, fetched: int, reported: Optional[int]) -> None:
+        if pages == 1 or pages % 25 == 0:
+            ui.info(f"[评论] 已抓取 {fetched} 条 | {pages} 页")
+
+    comment_cfg = comments.CommentConfig(
+        output_dir=output_dir,
+        cookie_path=cookiestore.bili_cookie_path(cookie_dir),
+        proxy=proxy,
+        limit=args.limit,
+        sort=getattr(args, "sort", "newest"),
+        progress=progress,
+    )
+    if thread:
+        ui.info(f"楼中楼 | 主评论 ID: {args.root_id} | URL: {args.url}")
+        result = comments.download_replies(args.url, str(args.root_id), comment_cfg)
+    else:
+        limit = str(args.limit) if args.limit is not None else "全部"
+        ui.info(f"主评论 | 排序: {args.sort} | 上限: {limit} | URL: {args.url}")
+        result = comments.download_main(args.url, comment_cfg)
+    _emit(result.messages)
+    return 0 if result.success else 1
+
+
 def _status_command(opts: Options) -> int:
     """Report meaningful session facts without downloading, refreshing, or prompting."""
     result = cookiestore.validate(opts.cookie_dir, proxy=opts.proxy)
@@ -448,6 +537,9 @@ def _repl(opts: Options, ytdlp: Optional[str], ffmpeg_bin: Optional[str]) -> int
 def main(argv: Optional[list[str]] = None) -> int:
     try:
         return _main_impl(argv)
+    except KeyboardInterrupt:
+        ui.warn("[取消] 下载已中断")
+        return 130
     except Exception:
         ui.error("[错误] 发生未预期错误，堆栈如下:")
         traceback.print_exc(file=sys.stderr)
@@ -460,6 +552,10 @@ def _main_impl(argv: Optional[list[str]] = None) -> int:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     if raw_argv and raw_argv[0] == "login":
         return _login_command(raw_argv[1:])
+    if raw_argv and raw_argv[0] == "comments":
+        return _comment_command(raw_argv[1:], thread=False)
+    if raw_argv and raw_argv[0] == "replies":
+        return _comment_command(raw_argv[1:], thread=True)
 
     parser = _build_parser()
     args = parser.parse_args(raw_argv)

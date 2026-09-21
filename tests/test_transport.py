@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gzip
+import http.client
 import json
 import urllib.error
 import urllib.request
@@ -13,6 +14,23 @@ import pytest
 
 from bili_dl import transport
 from bili_dl.config import REFERER, USER_AGENT
+
+
+def test_truncated_response_is_a_safe_transport_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    def truncated(self: object) -> bytes:
+        raise http.client.IncompleteRead(b"secret")
+
+    monkeypatch.setattr(_Response, "read", truncated)
+    payload, failure = transport.fetch_json(_Opener(), transport.request("https://example.com"))
+    assert payload is None and failure == transport.HttpFailure("network")
+    assert "secret" not in repr(failure)
+
+
+def test_invalid_utf8_is_not_silently_replaced() -> None:
+    payload, failure = transport.fetch_json(
+        _Opener(b'{"message":"\xff"}'), transport.request("https://example.com")
+    )
+    assert payload is None and failure == transport.HttpFailure("bad_data")
 
 
 class _Response:
