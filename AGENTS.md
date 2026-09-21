@@ -234,7 +234,14 @@
 - 主评论使用签名接口 `/x/v2/reply/wbi/main`；默认 `newest`（mode=2），`hot`（mode=3）显式选择。2026-09 实测 hot 连续页可返回相同 `next_offset/session_id` 却推进不同内容；服务端机制尚未确认，保守地使用同一 opener 串行请求，不宣称 offset 可恢复。hot 传输失败不自动重放，以防服务端已推进而客户端漏页；newest 和数字页码允许有限重试。
 - 楼中楼使用 `/x/v2/reply/reply` 的 `root + pn + ps`；上限包含根评论。主评论以布尔 `is_end`、楼中楼以空页确认结束；短页、动态 count 不作为楼中楼完整性的证据。无新增 ID/循环游标是失败而非完整成功。
 - 主评论 `all_count` 可能包含子回复，不能作为主评论完成百分比的分母。JSON 分别记录实际条数、首末统计和抓取时间；“全部”表示本次运行中 API 可枚举的全部内容，不是静态快照。
-- `commentapi.py` 负责传输重试、WBI 生命周期及页码/列表/归属校验，`comments.py` 统一去重、上限、进度、文件事务。保存对象去掉内嵌 `replies` 预览以保证条数语义，正文/图片/表情/回复关系保留；只将 ID 集合留在内存。
+- `commentapi.py` 负责传输重试、WBI 生命周期及页码/列表/归属校验，`comments.py` 统一去重、上限、进度、文件事务。保存对象去掉内嵌 `replies` 预览以保证条数语义；只将 ID 集合留在内存。
+
+### 2.31 评论默认 lean 投影——"先全量拉取，校验后白名单筛选"（v0.5.0）
+- **起因**：真实导出实测（2026-09）：436KB 的 100 条 hot 主评中阅读所需字段仅 ~5%；噪声大头是 `member.avatar_item`（22%，头像挂件分层渲染配置）、`member.vip`（18%，大会员徽章 CDN 图）、`user_sailing(+v2)`/`nameplate`/`pendant`（装扮勋章）。每条评论是一行 5-9KB 的 minified JSON，nvim/VSCode 在 CJK+emoji 超长行上渲染卡顿。
+- **方法**：B 站评论接口（wbi main / reply）**无服务端字段投影参数**，只能全量拉取。筛选单点在 `commentapi._comment()`（main/replies/root 三条路径共用漏斗）：先跑协议校验（ID 规范化、归属检查），再白名单投影。禁止为了省字节跳过校验。
+- **白名单**：`rpid_str`/`root_str`/`parent_str`（回复树）、`ctime`+`time`（epoch + 本机时区可读串）、`like`/`rcount`、`member.{mid,uname,level?,official?}`、`content.{message,pictures?（仅 img_src）}`；条件键 `pinned`（comments.py 按 pinned_ids 内联注入，仅 lean）、`up_liked`、`location`（IP 属地）。`_relation_id`/`_non_negative_int` 宽容降级（垃圾值→"0"/0），身份字段（rpid）仍严格。
+- **逃生门**：`--full` 保留原始对象（仍剔除内嵌 replies 预览）；`CommentConfig.full` 贯穿 cli → comments → CommentClient。header 恒为 `schema_version: 2` 且 `request.fields` 记 `"lean"|"full"`。
+- **测试锚定**：`test_lean_projection_keeps_reading_fields_and_drops_protocol_noise`（键集合精确断言 + 噪声 URL 不出现）、`test_full_mode_preserves_raw_objects`、`test_pinned_flag_is_inline_in_lean_but_not_in_full`；原子写入测试的 fail_write hook 以 `rpid_str` 识别记录行。
 - 原子文件事务覆盖头部、正文、替换及 Ctrl+C；失败不覆盖旧文件，当前临时数据丢弃，暂不支持续传。错误不得暴露响应正文或签名 URL。
 
 ## 3. 项目结构
@@ -263,7 +270,7 @@ bili-dl/
 │   ├── video.py                    # BV/AV/短链解析 + 共享视频元数据 + 安全文件名
 │   ├── wbi.py                      # nav 密钥提取 + WBI 参数签名
 │   ├── comments.py                 # 主评论/楼中楼串行分页 + 原子流式 JSON
-│   ├── commentapi.py               # 评论协议校验 + 任务内 WBI + 重试语义
+│   ├── commentapi.py               # 评论协议校验 + 任务内 WBI + 重试语义 + lean 字段投影（§2.31）
 │   ├── cookiesource.py            # Cookie 源文件检测 + 提取导入（纯逻辑，无 ui）
 │   ├── cookiestore.py             # Cookie 校验 + ensure_cookie 编排（纯逻辑，无 ui）
 │   ├── ffmpeg.py                  # ffprobe/ffmpeg 探测 + 零损失重封装/提取（纯逻辑，无 ui）

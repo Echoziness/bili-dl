@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-09-21
+
+### Changed
+
+- `comments`/`replies` now save lean, reading-oriented records by default
+  (`schema_version: 2`): reply-tree IDs, epoch `ctime` plus a local-timezone
+  readable `time`, like/reply counts, author `mid`/`uname` with `level` and
+  official verification when present, message text and picture URLs, plus inline
+  `pinned`, UP-liked and IP-location marks when applicable. Protocol noise such
+  as avatar/pendant/nameplate/VIP rendering config — about 95% of the raw
+  response bytes — is dropped after protocol validation, shrinking real exports
+  ~20x and ending editor stalls on multi-KB single-line records. The reply tree,
+  completeness semantics and atomic streaming format are unchanged.
+
+### Added
+
+- `--full` flag on `comments`/`replies` keeps the raw Bilibili comment objects
+  (embedded child reply previews are still removed in both modes).
+
+
 ## [0.4.3] - 2026-09-21
 
 ### Added

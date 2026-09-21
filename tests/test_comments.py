@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import urllib.parse
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -129,7 +130,7 @@ def test_main_download_streams_pages_deduplicates_and_marks_pinned(
         "pages": 2,
         "pinned_ids": ["1"],
     }
-    assert payload["request"] == {"sort": "newest", "limit": None}
+    assert payload["request"] == {"sort": "newest", "limit": None, "fields": "lean"}
     assert json.loads(queries[0]["pagination_str"][0]) == {"offset": ""}
     assert json.loads(queries[1]["pagination_str"][0]) == {"offset": "cursor-1"}
     assert all("w_rid" in query and "wts" in query for query in queries)
@@ -494,7 +495,7 @@ def test_thread_does_not_trust_stale_count_and_deduplicates_pages(
     ]
     monkeypatch.setattr(transport, "fetch_json", lambda *a, **kw: (pages.pop(0), None))
     payload = _load_result(comments.download_replies(VIDEO_URL, "100", cfg))
-    assert [r["rpid"] for r in payload["replies"]] == [101, 102, 103]
+    assert [r["rpid_str"] for r in payload["replies"]] == ["101", "102", "103"]
     assert payload["result"]["pages"] == 3
     assert payload["result"]["reported_reply_count_first"] == 1
     assert payload["result"]["reported_reply_count"] == 10
@@ -584,7 +585,7 @@ def test_atomic_output_preserves_old_file_at_every_failure_stage(
     original = comments._dump
 
     def fail_write(value: Any, stream: Any) -> None:
-        if stage == "header" or (isinstance(value, dict) and "rpid" in value):
+        if stage == "header" or (isinstance(value, dict) and "rpid_str" in value):
             if stage == "interrupt":
                 raise KeyboardInterrupt
             raise OSError("secret")
@@ -696,3 +697,121 @@ def test_empty_null_page_produces_a_valid_document(
     )
     assert payload["result"]["fetched_count"] == int(thread)
     assert payload["result"]["complete"]
+
+
+def _rich_comment(rpid: int) -> dict[str, Any]:
+    """A comment carrying the full protocol noise seen in real exports."""
+    base = _comment(rpid)
+    base["member"].update(
+        {
+            "avatar_item": {"layers": [{"visible": True, "general_spec": {"x": 1}}]},
+            "vip": {"vipType": 2, "label": {"img_label_uri_hans_static": "https://x/vip.png"}},
+            "user_sailing": {"pendant": {"id": 1, "image": "https://x/p.png"}},
+            "nameplate": {"name": "勋章", "image": "https://x/n.png"},
+            "pendant": {"pid": 56392, "image_enhance": "https://x/e.png"},
+            "avatar": "https://x/face.jpg",
+            "sign": "个性签名",
+            "sex": "保密",
+            "level_info": {"current_level": 6},
+            "official_verify": {"type": 0, "desc": "bilibili 知名UP主"},
+        }
+    )
+    base["content"].update(
+        {
+            "pictures": [
+                {"img_src": "https://x/pic1.jpg", "img_width": 100},
+                {"img_src": "", "img_width": 1},
+                "junk",
+            ],
+            "emote": {"[doge]": {"url": "https://x/e.png"}},
+            "members": [{"mid": "1", "uname": "at某人"}],
+        }
+    )
+    base["up_action"] = {"like": True, "reply": False}
+    base["reply_control"] = {"location": "IP属地：北京", "sub_reply_entry_text": "共3条回复"}
+    base["track_info"] = {"x": 1}
+    base["folder"] = {"has_folded": False}
+    return base
+
+
+def test_lean_projection_keeps_reading_fields_and_drops_protocol_noise(
+    cfg: comments.CommentConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    response = _main_page([_rich_comment(1)], is_end=True)
+    monkeypatch.setattr(transport, "fetch_json", lambda *a, **kw: (response, None))
+    payload = _load_result(comments.download_main(VIDEO_URL, cfg))
+
+    assert payload["schema_version"] == 2
+    assert payload["request"]["fields"] == "lean"
+    item = payload["comments"][0]
+    assert set(item) == {
+        "rpid_str",
+        "root_str",
+        "parent_str",
+        "ctime",
+        "time",
+        "like",
+        "rcount",
+        "member",
+        "content",
+        "up_liked",
+        "location",
+    }
+    assert item["member"] == {
+        "mid": "1",
+        "uname": "用户1",
+        "level": 6,
+        "official": "bilibili 知名UP主",
+    }
+    assert item["content"] == {"message": "正文", "pictures": ["https://x/pic1.jpg"]}
+    assert item["up_liked"] is True
+    assert item["location"] == "IP属地：北京"
+    assert item["time"] == datetime.fromtimestamp(item["ctime"]).strftime("%Y-%m-%d %H:%M")
+    dumped = json.dumps(item, ensure_ascii=False)
+    for noise in ("avatar_item", "vip", "sailing", "nameplate", "face.jpg", "track_info", "folder"):
+        assert noise not in dumped
+
+
+def test_full_mode_preserves_raw_objects(
+    cfg: comments.CommentConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = comments.CommentConfig(cfg.output_dir, cfg.cookie_path, full=True)
+    response = _main_page([_rich_comment(1)], is_end=True)
+    monkeypatch.setattr(transport, "fetch_json", lambda *a, **kw: (response, None))
+    payload = _load_result(comments.download_main(VIDEO_URL, cfg))
+
+    assert payload["schema_version"] == 2
+    assert payload["request"]["fields"] == "full"
+    item = payload["comments"][0]
+    assert item["member"]["avatar_item"]["layers"][0]["visible"] is True
+    assert item["reply_control"]["location"] == "IP属地：北京"
+    assert item["ctime"] == 1700000001
+    assert "time" not in item and "up_liked" not in item
+
+
+def test_pinned_flag_is_inline_in_lean_but_not_in_full(
+    cfg: comments.CommentConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    page = _main_page([_comment(2)], top=[_comment(1, "置顶")], is_end=True)
+    monkeypatch.setattr(transport, "fetch_json", lambda *a, **kw: (page, None))
+    payload = _load_result(comments.download_main(VIDEO_URL, cfg))
+    assert payload["comments"][0]["pinned"] is True
+    assert "pinned" not in payload["comments"][1]
+    assert payload["result"]["pinned_ids"] == ["1"]
+
+    full_cfg = comments.CommentConfig(cfg.output_dir, cfg.cookie_path, full=True)
+    payload = _load_result(comments.download_main(VIDEO_URL, full_cfg))
+    assert all("pinned" not in item for item in payload["comments"])
+    assert payload["result"]["pinned_ids"] == ["1"]
+
+
+def test_comments_cli_forwards_full_flag(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: list[comments.CommentConfig] = []
+    monkeypatch.setattr(cli, "_prepare_cookie", lambda opts: True)
+    monkeypatch.setattr(
+        cli.comments,
+        "download_main",
+        lambda url, cfg: captured.append(cfg) or DownloadResult(True),
+    )
+    assert cli.main(["comments", VIDEO_URL, "--full"]) == 0
+    assert captured[0].full is True

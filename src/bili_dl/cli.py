@@ -223,6 +223,11 @@ def _add_comment_options(parser: argparse.ArgumentParser, *, thread: bool) -> No
         ),
     )
     parser.add_argument(
+        "--full",
+        action="store_true",
+        help="save raw Bilibili comment objects (default: lean reading fields, ~5% of the size)",
+    )
+    parser.add_argument(
         "--output-dir",
         type=Path,
         default=None,
@@ -413,6 +418,7 @@ def _comment_command(argv: list[str], *, thread: bool) -> int:
         proxy=proxy,
         limit=args.limit,
         sort=getattr(args, "sort", "newest"),
+        full=args.full,
         progress=progress,
     )
     if thread:

@@ -27,6 +27,7 @@ class CommentConfig:
     proxy: str = ""
     limit: Optional[int] = None
     sort: str = "newest"
+    full: bool = False
     progress: Optional[Callable[[int, int, Optional[int]], None]] = None
 
 
@@ -71,7 +72,7 @@ def _download(url: str, cfg: CommentConfig, root_id: Optional[str]) -> DownloadR
         raise CommentError(error or "无法读取现有 Cookie")
     opener = transport.cookie_opener(jar, proxy=cfg.proxy)
     info = video.resolve(opener, transport.cookie_opener(proxy=cfg.proxy), url)
-    client = CommentClient(opener)
+    client = CommentClient(opener, full=cfg.full)
     page = (
         client.main(info.aid, cfg.sort, "")
         if root_id is None
@@ -85,12 +86,12 @@ def _download(url: str, cfg: CommentConfig, root_id: Optional[str]) -> DownloadR
     title = video.safe_filename_part(info.title) or "comments"
     path = cfg.output_dir / f"{title} [{video.safe_filename_part(info.bvid, 20)}].{suffix}.json"
     header: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": "main_comments" if root_id is None else "comment_thread",
         "video": {"aid": info.aid, "bvid": info.bvid, "title": info.title},
-        "request": {"sort": cfg.sort, "limit": cfg.limit}
+        "request": {"sort": cfg.sort, "limit": cfg.limit, "fields": "full" if cfg.full else "lean"}
         if root_id is None
-        else {"root_id": root_id, "limit": cfg.limit},
+        else {"root_id": root_id, "limit": cfg.limit, "fields": "full" if cfg.full else "lean"},
         "started_at": started_at,
     }
     if root_id is not None:
@@ -124,12 +125,15 @@ def _download(url: str, cfg: CommentConfig, root_id: Optional[str]) -> DownloadR
                 if cfg.limit is not None and len(seen) + root_count >= cfg.limit:
                     truncated = True
                     break
+                if rpid in page.pinned_ids:
+                    pinned_ids.append(rpid)
+                    if not cfg.full:
+                        # Inline the pinned signal so lean readers don't join result.pinned_ids.
+                        item = {**item, "pinned": True}
                 if seen:
                     stream.write(",\n")
                 _dump(item, stream)
                 seen.add(rpid)
-                if rpid in page.pinned_ids:
-                    pinned_ids.append(rpid)
                 added += 1
             if cfg.progress is not None:
                 cfg.progress(pages, len(seen) + root_count, page.reported_count)

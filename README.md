@@ -30,8 +30,10 @@ automatic session renewal, and foobar2000-friendly audio output.
   Bilibili as a UTF-8 SRT file, with each cue's start and end timestamps. It reuses
   your login and proxy without downloading media or requiring yt-dlp/ffmpeg.
 - **Structured comments** — download all API-visible main comments or one complete
-  reply thread as UTF-8 JSON. Optional limits stop after an exact number of unique
-  comments; no browser, yt-dlp or ffmpeg is required.
+  reply thread as UTF-8 JSON. Records keep only what reading comprehension needs
+  (author, text, reply tree, counts, timestamps) — about 5% of the raw response;
+  `--full` keeps the raw objects. Optional limits stop after an exact number of
+  unique comments; no browser, yt-dlp or ffmpeg is required.
 
 ## Install
 
@@ -202,10 +204,18 @@ Newest and numbered thread requests retry transient network/429/5xx failures
 within a fixed budget. A rejected WBI signature refreshes its keys once per page.
 
 Output is an atomic UTF-8 JSON document containing video metadata, the request,
-Bilibili comment objects and a final result summary. Embedded child `replies`
-previews are removed so the saved records obey the limit; content, images, emotes,
-author information and reply relationships are retained. IDs have a canonical
-`rpid_str` string for consumers that cannot represent large integers. Main-comment files are
+one minified comment record per line, and a final result summary (`schema_version: 2`).
+By default each record keeps only what reading comprehension needs: reply-tree IDs
+(`rpid_str`/`root_str`/`parent_str`), epoch `ctime` plus a local-timezone readable
+`time`, `like`/`rcount` counts, the author's `mid`/`uname` (plus `level` and official
+verification when present), the message text, and picture URLs. UP-liked marks
+(`up_liked`), IP location (`location`) and an inline `pinned` flag appear when
+applicable. Avatar/pendant/nameplate/VIP rendering config and other protocol noise —
+about 95% of the raw response — is dropped after protocol validation, so the files
+stay readable for humans, editors and AI tooling. Pass `--full` to keep the raw
+Bilibili comment objects instead; embedded child `replies` previews are removed in
+both modes so saved records obey the limit. IDs have a canonical `rpid_str` string
+for consumers that cannot represent large integers. Main-comment files are
 named `title [BV…].comments.json` (or `.comments.hot.json`); reply threads are
 named `title [BV…].comment-ROOT_ID.json`. An existing file is replaced only after
 the new document is complete. `result.complete` means the main API signalled its
@@ -269,6 +279,8 @@ bili-dl --batch-file urls.txt
 | `bili-dl comments URL --sort hot` | use Bilibili's session-bound hot order |
 | `bili-dl replies URL ROOT_ID` | download the root and all child replies |
 | `bili-dl replies URL ROOT_ID --limit N` | cap the thread at N objects including its root |
+
+Both comment commands also accept `--full` to save raw comment objects (default: lean reading fields).
 
 | Flag | Description |
 |------|-------------|
