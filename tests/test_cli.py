@@ -139,7 +139,7 @@ def test_login_does_not_require_ytdlp(monkeypatch: pytest.MonkeyPatch, tmp_path:
     monkeypatch.setattr(
         authqr,
         "poll",
-        lambda s: authqr.QrPollResult(
+        lambda s, on_scanned=None: authqr.QrPollResult(
             True, cookie_lines=[".bilibili.com\tTRUE\t/\tTRUE\t0\tSESSDATA\tx"]
         ),
     )
@@ -180,7 +180,7 @@ def test_login_uses_cookie_dir_from_config(monkeypatch: pytest.MonkeyPatch, tmp_
     monkeypatch.setattr(
         authqr,
         "poll",
-        lambda current: authqr.QrPollResult(
+        lambda current, on_scanned=None: authqr.QrPollResult(
             True,
             cookie_lines=[".bilibili.com\tTRUE\t/\tTRUE\t0\tSESSDATA\tx"],
             refresh_token="token",

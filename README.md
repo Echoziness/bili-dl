@@ -21,8 +21,8 @@ automatic session renewal, and foobar2000-friendly audio output.
 - **foobar2000-friendly audio** — every produced M4A goes through a zero-loss
   `ffmpeg -c copy` remux (`moov`-first + ISOM container). No re-encode, no
   quality loss, instant playback in picky players.
-- **Built-in login** — scan with the Bilibili App; no browser-cookie export,
-  browser-profile access, or separate feature installation.
+- **Built-in login** — scan a compact QR code with the Bilibili App;
+  no browser-cookie export, browser-profile access, or separate installation.
 - **Configurable** — set defaults in a TOML config file (`mode`, `proxy`,
   output dirs, etc.); CLI flags override per-invocation.
 - **Batch download** — download a list of URLs from a text file.
@@ -59,20 +59,35 @@ bili-dl -V                   # verify
 
 ### Cookies (one-time)
 
-#### Scan a QR code (recommended)
+#### Log in with Bilibili App confirmation
 
-`bili-dl` can create a **separate Bilibili Web login session** by
-scanning a QR code with the Bilibili App. It does not read your browser
-profile, inspect browser cookies, or require a particular browser.
+`bili-dl` can create a **separate Bilibili Web login session** using an
+App-scannable QR code. It does not read your browser profile, inspect browser
+cookies, or require a particular browser.
 
 After the normal installation, simply run:
 
 ```bash
 bili-dl login
+bili-dl login --url-only  # show the underlying App confirmation URL
 ```
 
-The command displays a QR code in an interactive terminal. Scan and confirm
-it in the Bilibili App. On success, it verifies the newly issued session with
+The command displays the temporary URL encoded in Bilibili's QR code and, when
+the whole image fits in the terminal, a compact QR code. Scan and confirm it in
+the Bilibili App. In a phone-browser check, opening the URL handed off to the
+Bilibili App and completed login. This handoff may depend on the phone and App.
+This is the QR confirmation URL, not a separate browser login. In Windows Edge,
+the page showed a disabled confirmation button and offered an APK download, so
+opening it on a desktop did not authorize `bili-dl`. The URL expires after about
+180 seconds. `--url-only` skips QR drawing, and a terminal too small to show the
+complete code falls back to the URL.
+Only open or share the temporary link with a device you control.
+If you switch Bilibili accounts after opening the confirmation page, the current
+request may remain "scanned but unconfirmed" with a disabled button. Cancel with
+Ctrl+C and run `bili-dl login` again to get a fresh URL and QR code for the new
+account.
+
+On success, `bili-dl` verifies the newly issued session with
 Bilibili before atomically replacing `cookies_bilibili.txt`; your normal
 download command can then reuse it. `bili-dl login` deliberately does not
 need `yt-dlp` or `ffmpeg`, so it can be tested on its own.
@@ -274,6 +289,7 @@ bili-dl --batch-file urls.txt
 
 | Command | Description |
 |---------|-------------|
+| `bili-dl login --url-only` | show the App scan-confirmation URL without drawing a terminal QR code |
 | `bili-dl comments URL` | download all API-visible main comments as JSON |
 | `bili-dl comments URL --limit N` | save at most N unique main comments |
 | `bili-dl comments URL --sort hot` | use Bilibili's session-bound hot order |

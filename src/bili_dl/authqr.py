@@ -14,6 +14,7 @@ import http.cookiejar
 import time
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -65,7 +66,7 @@ def qrcode_available() -> bool:
 
 
 def render_terminal_qr(url: str) -> str:
-    """Return a Unicode block QR image for *url*.
+    """Return a compact Unicode QR image for *url*.
 
     ``qrcode`` is a standard runtime dependency. Call
     :func:`qrcode_available` first so a damaged installation gets a useful
@@ -73,11 +74,38 @@ def render_terminal_qr(url: str) -> str:
     """
     import qrcode
 
-    code = qrcode.QRCode(border=1)
+    code = qrcode.QRCode(border=4)
     code.add_data(url)
     code.make(fit=True)
     matrix = code.get_matrix()
-    return "\n".join("".join("██" if cell else "  " for cell in row) for row in matrix)
+    pixels = {(False, False): " ", (True, False): "▀", (False, True): "▄", (True, True): "█"}
+    return "\n".join(
+        "".join(
+            pixels[(top, matrix[index + 1][column] if index + 1 < len(matrix) else False)]
+            for column, top in enumerate(matrix[index])
+        )
+        for index in range(0, len(matrix), 2)
+    )
+
+
+def _valid_login_url(url: str, key: str) -> bool:
+    """Accept only Bilibili's HTTPS confirmation URL for this QR key."""
+    if any(ord(char) < 32 or ord(char) == 127 for char in url):
+        return False
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        host = parsed.hostname or ""
+        keys = urllib.parse.parse_qs(parsed.query).get("qrcode_key", [])
+        return (
+            parsed.scheme == "https"
+            and (host == "bilibili.com" or host.endswith(".bilibili.com"))
+            and parsed.username is None
+            and parsed.password is None
+            and parsed.port in (None, 443)
+            and keys == [key]
+        )
+    except ValueError:
+        return False
 
 
 def start(*, proxy: Optional[str] = None) -> QrStartResult:
@@ -100,6 +128,8 @@ def start(*, proxy: Optional[str] = None) -> QrStartResult:
     key = payload.get("qrcode_key")
     if not isinstance(url, str) or not url or not isinstance(key, str) or not key:
         return QrStartResult(messages=[("error", "[登录] B 站未返回可用的二维码")])
+    if not _valid_login_url(url, key):
+        return QrStartResult(messages=[("error", "[登录] B 站返回的登录网址格式异常")])
     return QrStartResult(session=QrSession(url=url, key=key, jar=jar, opener=opener))
 
 
@@ -162,9 +192,15 @@ def _has_sessdata(lines: list[str]) -> bool:
     )
 
 
-def poll(session: QrSession, *, sleep: bool = True) -> QrPollResult:
-    """Wait for a scan/confirmation and return its Bilibili cookie lines."""
+def poll(
+    session: QrSession,
+    *,
+    sleep: bool = True,
+    on_scanned: Optional[Callable[[], None]] = None,
+) -> QrPollResult:
+    """Wait for confirmation, reporting the first scanned state once."""
     poll_url = f"{QR_POLL_API}?{urllib.parse.urlencode({'qrcode_key': session.key})}"
+    scanned_notified = False
     for _ in range(QR_LOGIN_MAX_POLLS):
         data, failure = transport.fetch_json(
             session.opener, transport.request(poll_url), timeout=QR_TIMEOUT
@@ -204,6 +240,10 @@ def poll(session: QrSession, *, sleep: bool = True) -> QrPollResult:
         if status not in (86101, 86090):
             message = str(payload.get("message") or f"未知状态 {status}")
             return QrPollResult(False, messages=[("error", f"[登录] 扫码失败：{message}")])
+        if status == 86090 and not scanned_notified:
+            scanned_notified = True
+            if on_scanned is not None:
+                on_scanned()
 
         if sleep:
             time.sleep(QR_POLL_INTERVAL)

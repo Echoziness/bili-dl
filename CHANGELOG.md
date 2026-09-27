@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.6] - 2026-09-28
+
+### Added
+
+- `bili-dl login` now displays Bilibili's temporary confirmation link and offers
+  `--url-only` for terminals that cannot show a QR code. The terminal QR uses
+  half-height Unicode blocks and a solid black-on-white background where ANSI
+  colors are available; it is omitted when it cannot fit in the visible terminal.
+
+### Fixed
+
+- Login now reports the first "scanned but unconfirmed" state once and explains
+  how to restart after switching App accounts. Ctrl+C during login reports an
+  interrupted login instead of an interrupted download.
+
 ## [0.4.5] - 2026-09-21
 
 ### Fixed
@@ -642,7 +657,10 @@ the system *larger* without making it *simpler*.
 - `--version` is now exposed as `-V` (capital), since `-v` is taken by
   `--video`. Matches yt-dlp / curl / pip convention.
 
-[Unreleased]: https://github.com/Echoziness/bili-dl/compare/v0.4.3...HEAD
+[Unreleased]: https://github.com/Echoziness/bili-dl/compare/v0.4.6...HEAD
+[0.4.6]: https://github.com/Echoziness/bili-dl/compare/v0.4.5...v0.4.6
+[0.4.5]: https://github.com/Echoziness/bili-dl/compare/v0.4.4...v0.4.5
+[0.4.4]: https://github.com/Echoziness/bili-dl/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/Echoziness/bili-dl/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/Echoziness/bili-dl/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/Echoziness/bili-dl/compare/v0.4.0...v0.4.1

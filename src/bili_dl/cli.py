@@ -194,9 +194,14 @@ def _build_login_parser() -> argparse.ArgumentParser:
     """Parser for the deliberately separate, interactive ``bili-dl login`` command."""
     p = argparse.ArgumentParser(
         prog="bili-dl login",
-        description="Use the Bilibili App to create a standalone QR-login session.",
+        description="Create a standalone Bilibili Web session with App confirmation.",
     )
     _add_session_options(p)
+    p.add_argument(
+        "--url-only",
+        action="store_true",
+        help="show the App scan-confirmation URL without drawing a terminal QR code",
+    )
     return p
 
 
@@ -341,19 +346,26 @@ def _prepare_cookie(opts: Options) -> bool:
     return False
 
 
+def _qr_fits_terminal(image: str) -> bool:
+    """Keep every QR row visible, with one column and row to spare."""
+    if not sys.stderr.isatty():
+        return False
+    try:
+        terminal = os.get_terminal_size(sys.stderr.fileno())
+    except (OSError, ValueError):
+        return False
+    rows = image.splitlines()
+    return bool(rows) and len(rows) < terminal.lines and max(map(len, rows)) < terminal.columns
+
+
 def _login_command(argv: list[str]) -> int:
     """Run the minimal opt-in QR-login experiment without checking yt-dlp."""
     args = _build_login_parser().parse_args(argv)
     if args.no_color:
         ui.disable_color()
     if not sys.stdin.isatty():
-        ui.error("[错误] 扫码登录需要交互终端")
+        ui.error("[错误] 登录需要交互终端")
         return 1
-    if not authqr.qrcode_available():
-        ui.error("[错误] 未安装扫码登录组件")
-        ui.info("请重新安装: pip install -U bili-dl")
-        return 1
-
     cfg = _load_settings(args.config)
     cookie_dir = args.cookie_dir or cfg.cookie_dir or config_dir()
     proxy = _resolve_proxy(args.proxy, cfg.proxy)
@@ -367,17 +379,30 @@ def _login_command(argv: list[str]) -> int:
     _emit(start.messages)
     if start.session is None:
         return 1
-    try:
-        image = authqr.render_terminal_qr(start.session.url)
-    except Exception as exc:
-        ui.error(f"[错误] 无法渲染二维码: {exc}")
-        return 1
-
-    ui.info("请使用 B 站 App 扫描二维码并在手机上确认（最长 180 秒）")
-    print(file=sys.stderr)
-    print(image, file=sys.stderr)
-    print(file=sys.stderr)
-    result = authqr.poll(start.session)
+    ui.info("B 站扫码确认网址（约 180 秒内有效；手机打开后在 B 站 App 确认）：")
+    print(start.session.url, file=sys.stderr)
+    if not args.url_only:
+        if not authqr.qrcode_available():
+            ui.warn("[登录] 未安装二维码组件，仅显示扫码确认网址；可重新安装 bili-dl")
+        else:
+            try:
+                image = authqr.render_terminal_qr(start.session.url)
+            except Exception:
+                ui.warn("[登录] 无法绘制二维码，仅显示扫码确认网址")
+            else:
+                if _qr_fits_terminal(image):
+                    ui.info("也可使用 B 站 App 扫描下方二维码并在手机上确认：")
+                    if ui.supports_color():
+                        image = "\n".join(f"\x1b[47;30m{row}\x1b[0m" for row in image.splitlines())
+                    print(image, file=sys.stderr)
+                else:
+                    ui.info("[登录] 终端空间不足以完整显示二维码，已显示扫码确认网址")
+    result = authqr.poll(
+        start.session,
+        on_scanned=lambda: ui.info(
+            "[登录] B 站已识别本次请求，等待 App 确认；若切换账号，请 Ctrl+C 后重跑 login"
+        ),
+    )
     _emit(result.messages)
     if not result.success:
         return 1
@@ -541,10 +566,11 @@ def _repl(opts: Options, ytdlp: Optional[str], ffmpeg_bin: Optional[str]) -> int
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
     try:
-        return _main_impl(argv)
+        return _main_impl(raw_argv)
     except KeyboardInterrupt:
-        ui.warn("[取消] 下载已中断")
+        ui.warn("[取消] 登录已中断" if raw_argv and raw_argv[0] == "login" else "[取消] 下载已中断")
         return 130
     except Exception:
         ui.error("[错误] 发生未预期错误，堆栈如下:")

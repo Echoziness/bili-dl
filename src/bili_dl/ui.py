@@ -41,6 +41,12 @@ def disable_color() -> None:
     _initialized = True
 
 
+def supports_color() -> bool:
+    """Whether stderr can display ANSI colors for a solid-background QR code."""
+    _init()
+    return _enabled
+
+
 def _init() -> None:
     global _enabled, _initialized
     if _initialized:

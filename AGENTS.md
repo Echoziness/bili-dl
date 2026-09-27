@@ -16,7 +16,7 @@
 ### 2.1 原 bd.ps1 的 PowerShell 作用域 bug（重构根因）
 - **现象**：`bd.ps1` 在主流程定义 `$commonOpt`，在函数 `Invoke-DownloadVideo` 内用 `@commonOpt` 引用；PowerShell 函数默认读不到调用者作用域的普通变量，导致 Cookie/Referer 参数被静默丢弃，非会员 1080P 实际下载退化为匿名。
 - **根因**：作用域隔离 + 静默失败。
-- **解法**：Python 版把 common 选项作为显式 `list[str]` 传入 `downloader.download()`，参数显式 threading，该 bug 类无法复现。位置：`src/bili_dl/downloader.py` 的 `_common_args()` + `download()` 签名。
+- **解法**：Python 版把 common 选项作为显式 `list[str]` 传入下载流程，参数显式 threading，该 bug 类无法复现。现位于 `src/bili_dl/media.py` 的 `_common_args()` + `download()`。
 - **教训**：任何"胶水脚本把公共参数定义在一处、函数内隐式引用"的设计都要在移植时显式化。
 
 ### 2.2 ffmpeg List[string].AddRange 在 PowerShell 不可用
@@ -40,8 +40,8 @@
 
 ### 2.5 nav API 在线校验的降级策略
 - **现象**：在线校验 Cookie 需调 `https://api.bilibili.com/x/web-interface/nav`，但网络/SSL 错误时不能因此阻断下载（本地格式可能仍有效）。
-- **解法**：`_online_check()` 返回 `True`（已登录）/`False`（未登录）/`None`（网络错误）；`None` 时降级为仅本地格式校验并打印警告，仍返回 True。
-- 位置：`src/bili_dl/cookies.py::_online_check()` + `test_cookie_valid()`。
+- **解法**：`cookiestore._nav_probe()` 返回响应或结构化失败；`cookiestore.validate()` 对探测失败降级为本地格式校验并附警告，登录明确失败时仍判无效。
+- 位置：`src/bili_dl/cookiestore.py` 的 `_nav_probe()` + `validate()`。
 
 ### 2.6 nav API 必须伪装浏览器 User-Agent（412 根因，非 SSL）
 - **现象**：Python 版上线后实测每次都走降级（"无法在线验证 Cookie ... 降级为本地格式校验"），而原 bd.ps1 PowerShell 的 `Invoke-RestMethod` 一直能成功显示已登录用户名。曾被误判为本机证书链问题。
@@ -54,7 +54,7 @@
 
 ### 2.7 TLS 证书校验默认开（安全硬化）
 - 原 bd.ps1 无条件 `--no-check-certificate` 是降级项；Python 版默认启用校验，仅 `-k/--insecure` 显式关闭，用于自签证书环境。
-- 位置：`cli.py` 的 `--insecure` 参数 → `downloader.py::_common_args()` 条件追加 `--no-check-certificate`。
+- 位置：`cli.py` 的 `--insecure` 参数 → `media.py::_common_args()` 条件追加 `--no-check-certificate`。
 
 ### 2.8 跨平台路径不绑平台 API
 - 原 bd.ps1 用 `[Environment]::GetFolderPath('MyVideos')` 是 Windows 专属；Python 版 `paths.py` 用 `sys.platform` 分支 + XDG 约定，同一代码三平台通用。
@@ -64,7 +64,7 @@
 - **历史现象**：初版只给父进程 `subprocess.run(..., encoding="utf-8")`，却没有让 yt-dlp 同样输出 UTF-8；在 CP936 Windows 上会把子进程字节错误解码，导致普通中文标题的预测路径乱码。全局 `sys.stdout.reconfigure("utf-8")` / `PYTHONUTF8` 也会改变用户终端行为，因此当时回退到宿主 locale。
 - **新证据（2026-09）**：标题 `【诗岸⧸洛天依】` 的 `⧸`（U+29F8）不属于 CP936。yt-dlp 的 `--print filename` 管道按 CP936 输出时会丢掉该字符，但真实下载通过 Windows Unicode 文件系统保留它；phase1 预测为“诗岸洛天依”，phase2 实际写成“诗岸⧸洛天依”，`out_path.exists()` 误判失败。旧有“GBK 外字符在预测和磁盘两侧会一致丢失”的假设已被反证。
 - **解法**：仅在 phase1 机器可读通道给 yt-dlp 传官方 `--encoding utf-8`，父进程同时用 `encoding="utf-8"` 解码。phase2、CLI stdio 和用户终端完全不变；仍禁止全局 reconfigure 或设置 `PYTHONUTF8`。
-- **测试锚定**：`tests/test_downloader.py::test_download_predict_uses_utf8_for_non_cp936_filename` 固定 `⧸` 回归；实测 BV1XkKL6nEQP 的预测路径与已下载文件一致。
+- **测试锚定**：`tests/test_media.py::test_download_predict_uses_utf8_for_non_cp936_filename` 固定 `⧸` 回归；实测 BV1XkKL6nEQP 的预测路径与已下载文件一致。
 - **原则**：进程间的机器可读协议应由发送方与接收方显式约定同一编码；不能只改单侧解码，也不能把局部协议要求扩大成全局终端策略。
 
 ### 2.10 `-v` 被占用，`--version` 用 `-V`（CLI 短选项冲突）
@@ -120,7 +120,7 @@
 - **`--no-color` flag**：显式禁用颜色，`cli.main()` 在解析后立即调 `ui.disable_color()`。
 - **stdin TTY 检查**：无 URL 且 stdin 非 TTY 时，报错"非交互模式需要提供 URL"并返回 1，不进 REPL。clig.dev §Interactivity："Only use prompts if stdin is a TTY"。
 - **`HTTP_PROXY`/`HTTPS_PROXY` 环境变量**：`_merge_settings()` 代理优先级链：CLI `--proxy` > config.toml `proxy` > `HTTPS_PROXY` > `HTTP_PROXY` > 空。clig.dev §Configuration："Check HTTP_PROXY, HTTPS_PROXY... if you're going to perform network operations"
-- **help 文本加示例和 issue 链接**：`--help` 显示 4 个示例 + GitHub issues URL。clig.dev §Help："Lead with examples" + "Provide a support path"
+- **help 文本加示例和 issue 链接**：`--help` 显示使用示例 + GitHub issues URL。clig.dev §Help："Lead with examples" + "Provide a support path"
 
 ### 2.18 TOML 配置文件化（v0.2.0）
 - **选型**：用 TOML 而非 INI/JSON/YAML——TOML 是 Python 生态标准（PEP 518/621），`tomllib` 3.11 入 stdlib，零依赖约束保持。
@@ -161,7 +161,7 @@
 - **现象（第三方审查发现）**：用户在 `config.toml` 写 `proxy = ""` 想禁用代理，但系统有 `HTTPS_PROXY` 环境变量时，bili-dl 反而走了系统代理。用户「明明禁了代理」却看到代理生效——配置文件语义被实现细节反转。
 - **根因**：`settings.load` 的 `data.get("proxy") or None` 把空字符串（用户显式写 `""`）归一为 `None`（与「未配置该键」不可区分）。下游 `_merge_settings` 对 `None` 的处理是「未配置 → 查环境变量」——空串用户的意图恰恰相反是「我明确要 None，不要查环境」。
 - **解法（v0.2.9）**：移除 `or None`，改为 `data.get("proxy")`。`tomllib` 对不存在的 key 返回 `None`，对 `proxy = ""` 返回 `""`——两者语义不同，应该保留。`_merge_settings` 的 `if proxy is None` 自然区分：`None` → 未配置 → 查 env；`""` → 显式禁用 → 跳过 env。
-- **v0.4 前补全**：仅在配置合并层保留空串还不够；若不给 yt-dlp 传 `--proxy ""`，子进程仍会重新读取继承的代理环境变量。现在 `downloader._common_args()` 始终传 `--proxy <resolved>`，空串使用 yt-dlp 官方定义的“直连”语义；认证 HTTP 则用 `ProxyHandler({})`。两条传输路径由同一个解析结果驱动。
+- **v0.4 前补全**：仅在配置合并层保留空串还不够；若不给 yt-dlp 传 `--proxy ""`，子进程仍会重新读取继承的代理环境变量。现在 `media._common_args()` 始终传 `--proxy <resolved>`，空串使用 yt-dlp 官方定义的“直连”语义；认证 HTTP 则用 `ProxyHandler({})`。两条传输路径由同一个解析结果驱动。
 - **测试锚定**：`test_empty_proxy_in_config_blocks_env_proxy` 断言 `proxy=""` 不被 env 覆盖；`test_load_empty_proxy_preserved` 断言 `""` 不被 `or None` 吞掉。
 - **教训**：`or None` 只能用于「不存在」与「空串」语义等价时。凡是用户可能主动写空值的配置字段，都要区分「没写」（None）与「写了但为空」（""）——否则显式意图会被静默反转，用户极难自我诊断。
 
@@ -206,6 +206,7 @@
 - **统一传输边界**：二维码、`nav`、`cookie/info`、`correspond`、refresh、confirm 的 HTTP 请求只能经 `transport.py`；协议模块不得各自封装 `urlopen`、请求头、超时或错误正文。传输错误只返回不含响应正文/凭证的结构化 `HttpFailure`。
 - **代理贯穿**：代理完全由用户管理，项目不探测可用性、不自动选择、不改写系统设置。CLI/config/env 代理只允许由 `cli._resolve_proxy()` 解析一次，优先级固定为 CLI > config > `HTTPS_PROXY` > `https_proxy` > `HTTP_PROXY` > `http_proxy` > 空串。解析后的值必须显式传到下载、扫码、nav 校验与续期全链路；认证/存储层的 `proxy` 参数保持 keyword-only。`proxy=""` 明确禁用环境代理，`None` 只供库调用表示沿用 urllib 默认环境。
 - **TLS 边界**：`-k/--insecure` 只传给 yt-dlp，绝不作用于登录与会话 API；认证传输始终使用系统默认 TLS 校验。
+- **扫码确认状态（2026-09-28 实测）**：二维码 URL 可在手机浏览器唤起 B 站 App 完成确认；电脑 Edge 的确认按钮为灰色且会提示下载 APK。进入确认页后切换 App 账号，本次 key 可能持续返回 `86090`（已扫码未确认），新账号按钮不可用；客户端无法由该状态识别账号或安全复用 key。首次 `86090` 只提示一次，换账号需取消并重新运行 `login` 生成新 key。
 
 ### 2.26 sdist 必须使用白名单（v0.4.0）
 - **现象**：Hatch 默认 sdist 会读取工作区内容；即使 `output/`、`tmp/` 没有被 Git 跟踪，本地 `uv build` 仍曾把研究文档、整个第三方仓库和其中的 `.env*` 文件装入 tar.gz。wheel 因已指定 `packages = ["src/bili_dl"]` 不受影响，但手动上传该 sdist 会造成供应链污染和潜在凭证泄露。
@@ -223,7 +224,7 @@
 - **现象**：仓库内执行 `uv run bili-dl -a URL` 时，预测阶段报 `AssertionError: SRE module mismatch`；同一个 `C:\Users\16697\miniforge3\Scripts\yt-dlp.exe` 在普通 PowerShell 中直接运行正常。
 - **根因**：`uv run` 为项目的 uv Python 3.11 设置 `PYTHONHOME`，外部 yt-dlp 启动器实际绑定 Miniforge Python 3.14。子进程继承该变量后，3.14 解释器加载了 3.11 标准库，`_sre` 与 `re._compiler` 版本不匹配，甚至在 yt-dlp 解析参数前就崩溃。
 - **解法**：两个 yt-dlp 子进程都接收父环境的副本，但显式移除 `PYTHONHOME`，让外部可执行文件使用自身解释器与标准库。保留 `PATH`、代理及其他用户环境；不全局修改当前进程，也不影响原生 ffmpeg。
-- **测试锚定**：`tests/test_downloader.py::test_download_does_not_leak_pythonhome_to_external_ytdlp` 断言两个阶段均移除 `PYTHONHOME` 且保留无关环境变量；真实 `uv run` 预测调用已验证成功。
+- **测试锚定**：`tests/test_media.py::test_download_does_not_leak_pythonhome_to_external_ytdlp` 断言两个阶段均移除 `PYTHONHOME` 且保留无关环境变量；真实 `uv run` 预测调用已验证成功。
 
 ### 2.29 WBI 签名边界
 - `wbi.py` 只负责从 `nav` 响应提取并校验 `wbi_img` 密钥、生成 mixin key 和签名参数；HTTP 必须继续复用 `transport`，评论分页与存储不得塞入该模块。
@@ -235,20 +236,20 @@
 - 楼中楼使用 `/x/v2/reply/reply` 的 `root + pn + ps`；上限包含根评论。主评论以布尔 `is_end`、楼中楼以空页确认结束；短页、动态 count 不作为楼中楼完整性的证据。无新增 ID/循环游标是失败而非完整成功。
 - 主评论 `all_count` 可能包含子回复，不能作为主评论完成百分比的分母。JSON 分别记录实际条数、首末统计和抓取时间；“全部”表示本次运行中 API 可枚举的全部内容，不是静态快照。
 - `commentapi.py` 负责传输重试、WBI 生命周期及页码/列表/归属校验，`comments.py` 统一去重、上限、进度、文件事务。保存对象去掉内嵌 `replies` 预览以保证条数语义；只将 ID 集合留在内存。
+- 原子文件事务覆盖头部、正文、替换及 Ctrl+C；失败不覆盖旧文件，当前临时数据丢弃，暂不支持续传。错误不得暴露响应正文或签名 URL。
 
-### 2.31 评论默认 lean 投影——"先全量拉取，校验后白名单筛选"（v0.5.0）
+### 2.31 评论默认 lean 投影——"先全量拉取，校验后白名单筛选"（v0.4.4）
 - **起因**：真实导出实测（2026-09）：436KB 的 100 条 hot 主评中阅读所需字段仅 ~5%；噪声大头是 `member.avatar_item`（22%，头像挂件分层渲染配置）、`member.vip`（18%，大会员徽章 CDN 图）、`user_sailing(+v2)`/`nameplate`/`pendant`（装扮勋章）。每条评论是一行 5-9KB 的 minified JSON，nvim/VSCode 在 CJK+emoji 超长行上渲染卡顿。
 - **方法**：B 站评论接口（wbi main / reply）**无服务端字段投影参数**，只能全量拉取。筛选单点在 `commentapi._comment()`（main/replies/root 三条路径共用漏斗）：先跑协议校验（ID 规范化、归属检查），再白名单投影。禁止为了省字节跳过校验。
 - **白名单**：`rpid_str`/`root_str`/`parent_str`（回复树）、`ctime`+`time`（epoch + 本机时区可读串）、`like`/`rcount`、`member.{mid,uname,level?,official?}`、`content.{message,pictures?（仅 img_src）}`；条件键 `pinned`（comments.py 按 pinned_ids 内联注入，仅 lean）、`up_liked`、`location`（IP 属地）。`_relation_id`/`_non_negative_int` 宽容降级（垃圾值→"0"/0），身份字段（rpid）仍严格。
 - **逃生门**：`--full` 保留原始对象（仍剔除内嵌 replies 预览）；`CommentConfig.full` 贯穿 cli → comments → CommentClient。header 恒为 `schema_version: 2` 且 `request.fields` 记 `"lean"|"full"`。
 - **测试锚定**：`test_lean_projection_keeps_reading_fields_and_drops_protocol_noise`（键集合精确断言 + 噪声 URL 不出现）、`test_full_mode_preserves_raw_objects`、`test_pinned_flag_is_inline_in_lean_but_not_in_full`；原子写入测试的 fail_write hook 以 `rpid_str` 识别记录行。
 
-### 2.32 argparse help 中裸 `%` 只在 Python 3.14 提前爆炸（v0.4.4 踩坑）
+### 2.32 argparse help 中裸 `%` 只在 Python 3.14 提前爆炸（v0.4.5 踩坑）
 - **现象**：`--full` 的 help 写 `~5% of the size`；CI（3.11/3.13）全绿，用户 miniforge Python **3.14** 启动即崩 `ValueError: badly formed help string`（`%o format: an integer is required, not dict`）。
 - **根因**：argparse 对每个 help 字符串做 `help % params` 插值。Python 3.14 把校验从 format 阶段提前到 `add_argument` 的 `_check_help`；旧版本只在打印 help 时才炸。版本矩阵 3.11/3.13 因此测不到。
 - **解法**：help 文本不用 `%`（改写措辞），如需字面 `%` 用 `%%` 转义。回归测试 `test_every_parser_formats_help_without_crashing` 对 `_build_parser`/`_build_comments_parser`/`_build_replies_parser` 调 `format_help()`——`format_help` 必然触发 `_expand_help`，任何版本都会暴露。
 - **教训**："help 文本即格式串"。CI 矩阵没覆盖最新 Python 版本时，差异点往往就在这类版本行为变更上（3.14 的 early `_check_help`）。`ci.yml` 已用 `matrix.include` 以最小代价补 **3.14**（ubuntu 单 job，见 §2.16 的版本数权衡）。
-- 原子文件事务覆盖头部、正文、替换及 Ctrl+C；失败不覆盖旧文件，当前临时数据丢弃，暂不支持续传。错误不得暴露响应正文或签名 URL。
 
 ## 3. 项目结构
 
