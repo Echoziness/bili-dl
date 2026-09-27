@@ -47,6 +47,7 @@ packages = ["src/bili_dl"]
 [tool.hatch.build.targets.sdist]
 include = [
     "/src",
+    "/scripts",
     "/tests",
     "/README.md",
     "/CHANGELOG.md",

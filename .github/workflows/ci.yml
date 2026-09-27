@@ -16,9 +16,10 @@ jobs:
           python-version: "3.13"
           cache: pip
       - run: pip install -e . ruff mypy
-      - run: ruff check src tests
-      - run: ruff format --check src tests
+      - run: ruff check src tests scripts
+      - run: ruff format --check src tests scripts
       - run: mypy src/bili_dl
+      - run: python scripts/release.py check
 
   test:
     strategy:

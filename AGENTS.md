@@ -210,7 +210,7 @@
 
 ### 2.26 sdist 必须使用白名单（v0.4.0）
 - **现象**：Hatch 默认 sdist 会读取工作区内容；即使 `output/`、`tmp/` 没有被 Git 跟踪，本地 `uv build` 仍曾把研究文档、整个第三方仓库和其中的 `.env*` 文件装入 tar.gz。wheel 因已指定 `packages = ["src/bili_dl"]` 不受影响，但手动上传该 sdist 会造成供应链污染和潜在凭证泄露。
-- **解法**：`pyproject.toml` 的 `[tool.hatch.build.targets.sdist]` 使用显式 `include` 白名单，只允许 `src/`、`tests/`、README、CHANGELOG、LICENSE、pyproject 与 uv.lock；根目录 `/output/`、`/tmp/` 同时加入 `.gitignore`，但白名单才是发布安全边界。
+- **解法**：`pyproject.toml` 的 `[tool.hatch.build.targets.sdist]` 使用显式 `include` 白名单，只允许 `src/`、`scripts/`、`tests/`、README、CHANGELOG、LICENSE、pyproject 与 uv.lock；根目录 `/output/`、`/tmp/` 同时加入 `.gitignore`，但白名单才是发布安全边界。
 - **发布守门**：`publish.yml` 在上传前必须依次执行 `twine check`、扫描 sdist 禁止 `tmp/output/.env/Cookie/auth_state`、安装并启动 wheel、校验 `v<version>` 标签与包版本完全一致。不得只因 CI 源码测试通过就跳过产物验证。
 
 ### 2.27 urllib 不会自动解压 B 站 gzip 响应（v0.4.1 修正）
@@ -286,6 +286,7 @@ bili-dl/
 │   ├── media.py                   # yt-dlp 两阶段下载 + 音视频后处理
 │   ├── subtitles.py               # 第一条字幕轨 → 带时间戳的 UTF-8 SRT
 │   ├── ui.py                      # ANSI 彩色输出到 stderr（clig.dev 合规）+ NO_COLOR/TTY 检查
+├── scripts/release.py             # 从包版本归档 CHANGELOG、校验 tag、提取 Release 正文
 ├── tests/
 │   ├── test_cookiesource.py       # 隐私核心测试（其他站点不泄漏）+ 导入逻辑
 │   ├── test_cookiestore.py        # 校验 + ensure_cookie + _nav_probe mock（网络/HTTP/成功）
@@ -304,10 +305,11 @@ bili-dl/
 │   ├── test_settings.py           # TOML 配置加载（missing/complete/partial/malformed）
 │   ├── test_paths.py              # 跨平台路径分支（mock platform）
 │   ├── test_package.py            # 包导入冒烟测试
+│   ├── test_release.py            # 发版元数据与重复执行检查
 │   └── data/sample_cookies_all.txt
 └── .github/workflows/
     ├── ci.yml                     # lint(ruff+mypy) + test(3平台×2版本) + coverage
-    └── publish.yml                # push v* tag → test 前置(ruff+mypy+pytest) → 自动发布 PyPI
+    └── publish.yml                # push v* tag → 校验 → PyPI → 从 CHANGELOG 创建 GitHub Release
 ```
 
 ## 4. 关键约定
@@ -389,18 +391,17 @@ uv run python -m build
 ## 7. 发版流程（当前）
 > 任何一步不绿不得进入下一步。
 
-1. 改版本号：仅 `src/bili_dl/__init__.py`（`pyproject.toml` 用 hatchling `dynamic = ["version"]` 自动读取）
-2. 写 CHANGELOG（Keep a Changelog 格式）
+1. 平时将用户可见的变更写在 `CHANGELOG.md` 的 `[Unreleased]` 下；发版时仅在 `src/bili_dl/__init__.py` 手填新版本号（hatchling 动态读取），执行 `python scripts/release.py prepare`，由脚本归档本版段落、日期与比较链接，再执行 `python scripts/release.py check`。
+2. 检查 CHANGELOG 的本版内容与自动生成的比较链接；若本次没有用户可见变更，不创建空发布。
 3. 本地全量验证（**四项缺一不可**）：
    ```bash
-   uv run ruff check src tests        # 逻辑 lint
-   uv run ruff format --check src tests  # 格式检查
+   uv run ruff check src tests scripts        # 逻辑 lint
+   uv run ruff format --check src tests scripts  # 格式检查
    uv run mypy src/bili_dl            # 类型检查 (strict)
    uv run pytest                      # 单元测试
    ```
-   - 若 format 报 `Would reformat`，先 `uv run ruff format src tests` 再提交。
-4. `uv build` 后检查 wheel/sdist 内容并执行 `twine check dist/*`；产物不得包含工作区临时文件或凭证。
-5. `git commit -m "release: vX.Y.Z"`
-6. 先 push 主分支并等待 CI 全绿，再 `git tag -a vX.Y.Z -m "vX.Y.Z"` 并 push tag。
-7. 等 Publish 工作流全绿并从 PyPI 实际安装验证。
-8. `gh release create vX.Y.Z --title "vX.Y.Z" --notes "<从 CHANGELOG 取本版本段落>"` 创建 Release。
+   - 若 format 报 `Would reformat`，先 `uv run ruff format src tests scripts` 再提交。
+4. `uv build` 后仅检查**当前版本**的 wheel/sdist 并执行 `twine check`；产物不得包含工作区临时文件或凭证。`dist/` 可能有旧版文件，不用 `dist/*` 当成本版产物集合。
+5. 创建提交（消息可以不重复写版本号）。
+6. 先 push 主分支并等待 CI 全绿，再手填一次 tag 版本：`git tag -a vX.Y.Z -m "Release"`，随后推送刚创建的 tag。Publish 工作流在上传前校验 tag、包版本与 CHANGELOG 对应。
+7. 等 Publish 工作流的测试、PyPI 上传、GitHub Release 创建三个 job 全绿，并从官方 PyPI 实际安装验证。Release 正文由 tag 对应的 CHANGELOG 段落自动生成；重跑时覆盖同一正文，不追加重复内容。

@@ -14,10 +14,11 @@ jobs:
           python-version: "3.13"
           cache: pip
       - run: pip install -e . pytest ruff mypy
-      - run: ruff check src tests
-      - run: ruff format --check src tests
+      - run: ruff check src tests scripts
+      - run: ruff format --check src tests scripts
       - run: mypy src/bili_dl
       - run: pytest
+      - run: python scripts/release.py check "$GITHUB_REF_NAME"
 
   publish:
     needs: test
@@ -68,3 +69,22 @@ jobs:
           if actual != expected:
               raise SystemExit(f"tag {actual!r} does not match package version {expected!r}")
       - uses: pypa/gh-action-pypi-publish@release/v1
+
+  release:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Extract this tag's changelog section
+        run: python scripts/release.py notes "$GITHUB_REF_NAME" release-notes.md
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file release-notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes-file release-notes.md
+          fi

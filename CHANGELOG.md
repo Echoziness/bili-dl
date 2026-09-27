@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.7] - 2026-09-28
+
+### Changed
+
+- Release preparation now derives the dated changelog heading and comparison
+  links from the package version. After the tag publishes to PyPI, the release
+  workflow creates the GitHub Release from that version's changelog section.
+
 ## [0.4.6] - 2026-09-28
 
 ### Added
@@ -657,7 +665,8 @@ the system *larger* without making it *simpler*.
 - `--version` is now exposed as `-V` (capital), since `-v` is taken by
   `--video`. Matches yt-dlp / curl / pip convention.
 
-[Unreleased]: https://github.com/Echoziness/bili-dl/compare/v0.4.6...HEAD
+[Unreleased]: https://github.com/Echoziness/bili-dl/compare/v0.4.7...HEAD
+[0.4.7]: https://github.com/Echoziness/bili-dl/compare/v0.4.6...v0.4.7
 [0.4.6]: https://github.com/Echoziness/bili-dl/compare/v0.4.5...v0.4.6
 [0.4.5]: https://github.com/Echoziness/bili-dl/compare/v0.4.4...v0.4.5
 [0.4.4]: https://github.com/Echoziness/bili-dl/compare/v0.4.3...v0.4.4
