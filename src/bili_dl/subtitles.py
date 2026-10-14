@@ -72,13 +72,13 @@ def _to_srt(body: Any) -> str:
 
 
 def _write_srt(path: Path, text: str) -> None:
-    """Replace only after a complete write, preserving existing output on failure."""
+    """Write UTF-8 BOM and CRLF for Windows players, then atomically replace."""
     temporary: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
             mode="w",
-            encoding="utf-8",
-            newline="\n",
+            encoding="utf-8-sig",
+            newline="\r\n",
             dir=path.parent,
             prefix=".subtitle-",
             suffix=".tmp",

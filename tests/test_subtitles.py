@@ -91,10 +91,15 @@ def test_first_returned_track_and_requested_part_are_preserved(
     assert result.output_path is not None
     assert result.output_path.name.endswith("p2.ai-en.srt")
     assert "中文⧸标题_示例" in result.output_path.name
-    assert result.output_path.read_text(encoding="utf-8") == (
+    expected = (
         "1\n00:00:00,000 --> 00:00:01,235\n第一句\n\n"
         "2\n00:01:00,000 --> 01:00:00,001\n第二句\n换行\n\n"
     )
+    # Check the output contract in bytes: read_text normalizes line endings.
+    assert result.output_path.read_bytes() == b"\xef\xbb\xbf" + expected.replace(
+        "\n", "\r\n"
+    ).encode("utf-8")
+    assert result.output_path.read_text(encoding="utf-8-sig") == expected
     assert len(api["calls"]) == 3
     _, player_url, _ = api["calls"][1]
     assert urllib.parse.parse_qs(urllib.parse.urlsplit(player_url).query) == {

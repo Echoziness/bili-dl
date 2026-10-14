@@ -178,6 +178,10 @@ to a later track if the first one fails. A `?p=N` URL selects that part; otherwi
 part 1 is used. Regular BV/AV video URLs, bare BV/AV identifiers and `b23.tv`
 short links are supported. Bangumi/course URLs are not supported in this mode.
 
+SRT files use UTF-8 with BOM and CRLF line endings on all platforms for Windows
+player compatibility. When reading them in Python, use `encoding="utf-8-sig"`
+to consume the BOM.
+
 SRT output goes into the video output directory (`--output-dir` / `video_dir`),
 named `title [BV…] p1.ai-zh.srt`, for example. Each cue retains its start and end
 times with millisecond precision. No video or audio file is downloaded. A missing

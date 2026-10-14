@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.8] - 2026-10-15
+
+### Fixed
+
+- SRT subtitles now use UTF-8 with BOM and CRLF line endings on all platforms.
+  This resolves the reported garbled text and all-at-once subtitle display in
+  the user's Microsoft player, while preserving cue text and timestamps.
+
 ## [0.4.7] - 2026-09-28
 
 ### Changed
@@ -665,7 +673,8 @@ the system *larger* without making it *simpler*.
 - `--version` is now exposed as `-V` (capital), since `-v` is taken by
   `--video`. Matches yt-dlp / curl / pip convention.
 
-[Unreleased]: https://github.com/Echoziness/bili-dl/compare/v0.4.7...HEAD
+[Unreleased]: https://github.com/Echoziness/bili-dl/compare/v0.4.8...HEAD
+[0.4.8]: https://github.com/Echoziness/bili-dl/compare/v0.4.7...v0.4.8
 [0.4.7]: https://github.com/Echoziness/bili-dl/compare/v0.4.6...v0.4.7
 [0.4.6]: https://github.com/Echoziness/bili-dl/compare/v0.4.5...v0.4.6
 [0.4.5]: https://github.com/Echoziness/bili-dl/compare/v0.4.4...v0.4.5

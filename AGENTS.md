@@ -344,6 +344,8 @@ bili-dl/
 
 ## 5. 常用命令
 
+SRT 磁盘输出统一使用 UTF-8 BOM + CRLF（所有平台）；测试须检查原始字节，`read_text()` 会归一化换行。2026-10-15 用户确认该组合解决了案例字幕在本机微软播放器中的乱码及整段显示问题；播放器具体版本未记录，BOM 与 CRLF 的独立作用未隔离验证，不据此声称所有播放器均已实测兼容。
+
 字幕模式使用 `-s/--subtitle`、REPL `s` 或配置 `mode = "s"`，共用 `video_dir/--output-dir`。只取 API 返回的第一条字幕轨，不排序、不尝试后续轨，不做 ASR；保留逐句起止时间并原子写入 UTF-8 SRT。普通投稿链接的 `?p=N` 指定分 P，默认 P1。字幕 HTTP 复用 `transport`，CookieJar 加载由 `transport.load_cookie_jar` 统一提供；短链接与字幕 CDN 请求不携带登录 Cookie，TLS 始终校验。历史章节中的 yt-dlp 实现及测试位置现分别为 `media.py` / `test_media.py`。
 
 评论使用独立子命令：`comments URL [--sort newest|hot] [--limit N]` 与 `replies URL ROOT_ID [--limit N]`。默认不限量，输出 UTF-8 JSON 到 `video_dir/--output-dir`；楼中楼上限包含主评论。无需 yt-dlp/ffmpeg。
