@@ -14,7 +14,7 @@ Configuration precedence (highest to lowest, per clig.dev §Configuration):
 
 Modes:
   all — video+audio (DASH, merged to MP4) + extract independent M4A
-  v   — video only (single-file MP4 when such a stream exists)
+  v   — video with sound, without extracting a separate audio file
   a   — audio only (M4A, standardised to faststart ISOM)
   s   — first returned subtitle track (SRT, with sentence timestamps)
 """
@@ -64,144 +64,245 @@ class Options:
     audio_dir: Optional[Path] = None
 
 
-_HELP_EPILOG = """\
-examples:
-  bili-dl https://www.bilibili.com/video/BV...     # video + audio (default)
-  bili-dl -a https://www.bilibili.com/video/BV...  # audio only (M4A)
-  bili-dl -s https://www.bilibili.com/video/BV...  # first subtitle track (SRT)
-  bili-dl --batch-file urls.txt                    # batch download
-  bili-dl --status                                 # inspect login and renewal state
-  bili-dl login                                    # QR login
-  bili-dl comments URL [--limit N]                 # main comments (all by default)
-  bili-dl replies URL ROOT_ID [--limit N]          # one thread, including its root
-  bili-dl                                          # interactive REPL
-
-report issues: https://github.com/Echoziness/bili-dl/issues\
-"""
+def _help_parser(
+    prog: str, *, usage: str, description: str, epilog: str
+) -> argparse.ArgumentParser:
+    """Keep all four help entry points consistent without changing their syntax."""
+    return argparse.ArgumentParser(
+        prog=prog,
+        usage=usage,
+        description=description,
+        epilog=epilog,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        add_help=False,
+    )
 
 
-def _add_session_options(p: argparse.ArgumentParser) -> None:
+def _output_help(*, audio: bool = False) -> str:
+    """Describe platform defaults without resolving or disclosing personal paths."""
+    directories = (
+        ("Windows", r"%USERPROFILE%\Videos\bilibili_videos", r"%USERPROFILE%\Music\bilibili_audio"),
+        ("macOS", "~/Movies/bilibili_videos", "~/Music/bilibili_audio"),
+        ("Linux", "$XDG_DOWNLOAD_DIR/bilibili_videos", "$XDG_DOWNLOAD_DIR/bilibili_audio"),
+    )
+    lines = ["默认输出目录（按运行系统选择；符号路径不展开用户名）："]
+    for system, video_path, audio_path in directories:
+        lines.append(f"  {system} 视频 / 字幕 / 评论：{video_path}")
+        if audio:
+            lines.append(f"          音频：{audio_path}")
+    lines.append("  Linux 的 XDG_DOWNLOAD_DIR 未设置时使用 ~/Downloads。")
+    lines.append("  config.toml 或命令行可覆盖上述目录。")
+    return "\n".join(lines)
+
+
+def _session_help() -> str:
+    return r"""配置与会话目录（符号路径不展开用户名）：
+  Windows：%APPDATA%\bili-dl
+  macOS：~/Library/Application Support/bili-dl
+  Linux：$XDG_CONFIG_HOME/bili-dl（未设置时为 ~/.config/bili-dl）
+  默认配置文件为上述目录中的 config.toml，需自行创建。
+  会话目录按需生成 cookies_bilibili.txt、auth_state.json 和锁文件。
+  --config 指定配置文件；--cookie-dir 指定会话目录，不改变配置文件位置。
+  命令行参数 > config.toml > 内置默认值；代理还会读取环境变量。
+  代理环境变量依次为 HTTPS_PROXY、https_proxy、HTTP_PROXY、http_proxy。
+  子命令的选项放在子命令之后，如 bili-dl login --config my.toml。
+  首次使用先运行 bili-dl login；也可将 Netscape 格式 Cookie .txt
+  放入 Cookie 目录自动导入。下载时不会弹出扫码登录。
+
+文档：https://github.com/Echoziness/bili-dl#readme
+反馈：https://github.com/Echoziness/bili-dl/issues"""
+
+
+def _add_help_options(p: argparse.ArgumentParser, *, version: bool = False) -> None:
+    display = p.add_argument_group("帮助与显示")
+    display.add_argument("-h", "--help", action="help", help="显示此帮助并退出")
+    if version:
+        # -v is already used for video downloads.
+        display.add_argument(
+            "-V",
+            "--version",
+            action="version",
+            version=f"bili-dl {__version__}",
+            help="显示版本并退出",
+        )
+    display.add_argument(
+        "--no-color", action="store_true", help="禁用彩色输出（也支持 NO_COLOR 环境变量）"
+    )
+
+
+def _add_session_options(
+    p: argparse.ArgumentParser, *, status: bool = False, media: bool = False
+) -> None:
     """Keep login, content and media flags on the same configuration contract."""
-    p.add_argument(
+    session = p.add_argument_group("登录与配置")
+    if status:
+        session.add_argument(
+            "--status",
+            action="store_true",
+            help="联网查看登录与续期状态；不执行下载或续期",
+        )
+    session.add_argument(
         "--cookie-dir",
         type=Path,
         default=None,
         metavar="DIR",
-        help=f"override cookie directory (default: {config_dir()})",
+        help="指定 Cookie 和登录状态的存储目录",
     )
-    p.add_argument(
+    session.add_argument(
         "--config",
         type=Path,
         default=None,
         metavar="FILE",
-        help=f"override config file path (default: {config_file_path()})",
+        help="读取指定 TOML 配置文件（内置路径见下方）",
     )
-    p.add_argument(
+    network = p.add_argument_group("网络")
+    network.add_argument(
         "--proxy",
         default=None,
         metavar="URL",
-        help="proxy URL for downloads and Bilibili APIs (env: HTTP_PROXY, HTTPS_PROXY)",
+        help='下载及 B 站 API 的代理；传空字符串 "" 可禁用环境代理',
     )
-    p.add_argument(
-        "--no-color",
-        action="store_true",
-        help="disable colored output (also disabled by NO_COLOR env var or non-TTY)",
-    )
+    if media:
+        network.add_argument(
+            "-k",
+            "--insecure",
+            action="store_true",
+            default=None,
+            help="仅跳过 yt-dlp 的 TLS 证书校验；登录、字幕和评论仍校验",
+        )
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
-        prog="bili-dl",
-        description="Cross-platform Bilibili video, audio, subtitle and comment downloader.",
-        epilog=_HELP_EPILOG,
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+    p = _help_parser(
+        "bili-dl",
+        usage="%(prog)s [选项] URL\n"
+        "       %(prog)s [选项] --batch-file FILE\n"
+        "       %(prog)s {login,comments,replies} ...\n"
+        "       %(prog)s --status\n"
+        "       %(prog)s [选项]",
+        description="""\
+B 站视频、音频、字幕和评论下载工具。
+
+常用示例（将 URL 替换为视频链接）：
+  bili-dl login                     用 B 站 App 扫码登录
+  bili-dl URL                       保存视频，并额外提取音频（内置默认模式）
+  bili-dl -a URL                    只保存音频
+  bili-dl -s URL                    只保存字幕（SRT）
+  bili-dl --batch-file urls.txt      按当前模式批量下载
+  bili-dl --status                  查看登录与续期状态
+  bili-dl                           交互输入链接，all/v/a/s 切换，q 退出
+
+评论子命令（JSON 输出）：
+  bili-dl comments URL --limit 100   保存最多 100 条主评论
+  bili-dl replies URL ROOT_ID        保存一条主评论及其楼中楼
+  各子命令支持 --help，例如 bili-dl comments --help。""",
+        epilog=f"""\
+{_output_help(audio=True)}
+
+使用说明：
+  音视频模式需要 yt-dlp；ffmpeg 用于合并视频、提取音频和容器修复。
+  字幕、评论、登录和 --status 无需 yt-dlp / ffmpeg。
+  字幕只取第一条已有字幕，不做语音识别；链接 ?p=N 指定分 P，默认 P1。
+  config.toml 支持 mode（all/v/a/s）、video_dir、audio_dir、cookie_dir、
+  proxy、insecure；例如 mode = "a" 可将默认模式改为仅音频。
+
+{_session_help()}""",
     )
-    mode = p.add_mutually_exclusive_group()
-    mode.add_argument(
+    target = p.add_argument_group("下载目标")
+    target.add_argument(
+        "url",
+        nargs="?",
+        default=None,
+        metavar="URL",
+        help="视频链接（字幕也支持 BV/AV 号）；省略时交互输入（需终端）",
+    )
+    mode = p.add_argument_group("下载模式（四选一；未配置时默认 --all）")
+    modes = mode.add_mutually_exclusive_group()
+    modes.add_argument(
         "--all",
         action="store_const",
         const="all",
         dest="mode",
-        help="download video + audio (default)",
+        help="保存带声音的视频，并额外提取独立音频（需 ffmpeg）",
     )
-    mode.add_argument(
-        "-v", "--video", action="store_const", const="v", dest="mode", help="download video only"
+    modes.add_argument(
+        "-v",
+        "--video",
+        action="store_const",
+        const="v",
+        dest="mode",
+        help="只保存带声音的视频，不额外提取音频",
     )
-    mode.add_argument(
+    modes.add_argument(
         "-a",
         "--audio",
         action="store_const",
         const="a",
         dest="mode",
-        help="download audio only (M4A)",
+        help="只保存音频（优先 M4A），有 ffmpeg 时做无损容器修复",
     )
-    mode.add_argument(
+    modes.add_argument(
         "-s",
         "--subtitle",
         action="store_const",
         const="s",
         dest="mode",
-        help="download the first returned subtitle track only (SRT with timestamps)",
+        help="只保存 API 返回的第一条字幕（带时间戳的 SRT）",
     )
-    # NOTE: -v is taken by --video; expose --version via -V. Both yt-dlp and
-    # curl use the same convention (-V / --version), so users won't be surprised.
-    p.add_argument(
-        "-V",
-        "--version",
-        action="version",
-        version=f"bili-dl {__version__}",
-        help="show version and exit",
-    )
-    p.add_argument(
-        "-k",
-        "--insecure",
-        action="store_true",
-        default=None,
-        help="skip yt-dlp TLS verification; authentication APIs stay verified",
-    )
-    _add_session_options(p)
-    p.add_argument(
+    output = p.add_argument_group("输出与批量")
+    output.add_argument(
         "--output-dir",
         type=Path,
         default=None,
         metavar="DIR",
-        help="override video/subtitle output directory",
+        help="视频和字幕目录；音频目录由 --audio-dir 单独指定",
     )
-    p.add_argument(
+    output.add_argument(
         "--audio-dir",
         type=Path,
         default=None,
         metavar="DIR",
-        help="override audio output directory",
+        help="下载或提取的音频目录（也适用于 --all）",
     )
-    p.add_argument(
+    output.add_argument(
         "--batch-file",
         type=Path,
         default=None,
         metavar="FILE",
-        help="download URLs listed in a text file (one URL per line, # comments)",
+        help="UTF-8 链接列表，每行一个；忽略空行和 # 开头的行",
     )
-    p.add_argument(
-        "--status",
-        action="store_true",
-        help="show Cookie and automatic-renewal status without downloading",
-    )
-    p.add_argument("url", nargs="?", default=None, help="Bilibili video URL")
+    _add_session_options(p, status=True, media=True)
+    _add_help_options(p, version=True)
     return p
 
 
 def _build_login_parser() -> argparse.ArgumentParser:
     """Parser for the deliberately separate, interactive ``bili-dl login`` command."""
-    p = argparse.ArgumentParser(
-        prog="bili-dl login",
-        description="Create a standalone Bilibili Web session with App confirmation.",
+    p = _help_parser(
+        "bili-dl login",
+        usage="%(prog)s [选项]",
+        description="""\
+用 B 站 App 确认，建立独立的 Web 登录会话，供后续下载复用。
+
+示例：
+  bili-dl login                         显示二维码和临时确认网址
+  bili-dl login --url-only              只显示网址，在手机打开后由 App 确认
+  bili-dl login --config my.toml        使用指定配置文件
+
+需要交互终端；无需 yt-dlp / ffmpeg，也不读取浏览器 Profile。
+--url-only 仍会等待手机确认并保存登录状态，不会只打印网址就退出。
+网址约 180 秒内有效；切换账号时请 Ctrl+C 后重新运行 login。
+登录成功后可用 bili-dl --status 检查状态；下载会按需自动续期。""",
+        epilog=_session_help(),
     )
-    _add_session_options(p)
-    p.add_argument(
+    login = p.add_argument_group("登录方式")
+    login.add_argument(
         "--url-only",
         action="store_true",
-        help="show the App scan-confirmation URL without drawing a terminal QR code",
+        help="不绘制终端二维码，仅显示手机 App 确认网址（仍需交互终端）",
     )
+    _add_session_options(p)
+    _add_help_options(p)
     return p
 
 
@@ -216,55 +317,85 @@ def _positive_int(value: str) -> int:
 
 
 def _add_comment_options(parser: argparse.ArgumentParser, *, thread: bool) -> None:
-    parser.add_argument(
+    content = parser.add_argument_group("导出内容")
+    content.add_argument(
         "--limit",
         type=_positive_int,
         default=None,
         metavar="N",
         help=(
-            "maximum objects to save, including the root; default: all"
+            "最多保存 N 条，包含主评论本身；默认不限，N 为正整数"
             if thread
-            else "maximum main comments to save; default: all"
+            else "最多保存 N 条主评论（含置顶）；默认不限，N 为正整数"
         ),
     )
-    parser.add_argument(
+    content.add_argument(
         "--full",
         action="store_true",
-        help="save raw Bilibili comment objects (default: lean reading fields)",
+        help="保留原始字段（不含回复预览）；默认精简阅读字段",
     )
-    parser.add_argument(
+    output = parser.add_argument_group("输出")
+    output.add_argument(
         "--output-dir",
         type=Path,
         default=None,
         metavar="DIR",
-        help="override comment output directory (default: video directory)",
+        help="JSON 输出目录；默认用配置 video_dir 或内置视频目录",
     )
     _add_session_options(parser)
+    _add_help_options(parser)
 
 
 def _build_comments_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="bili-dl comments",
-        description="Download main comments as UTF-8 JSON (newest order by default).",
+    parser = _help_parser(
+        "bili-dl comments",
+        usage="%(prog)s [选项] URL",
+        description="""\
+导出视频主评论为 UTF-8 JSON；楼中楼需另用 replies 子命令。
+
+示例：
+  bili-dl comments BV1Got26ZE5K                       导出全部可获取的主评论
+  bili-dl comments BV1Got26ZE5K --sort hot --limit 100 热门主评论，最多 100 条
+  bili-dl comments BV1Got26ZE5K --output-dir ./comments
+
+默认按最新排序，置顶评论优先且计入上限；“全部”指本次 API 可枚举的内容。
+需要有效登录；无需 yt-dlp / ffmpeg。失败或中断时保留旧文件，暂不支持续传。""",
+        epilog=f"{_output_help()}\n\n{_session_help()}",
     )
-    parser.add_argument("url", help="Bilibili video URL, BV number or av number")
-    parser.add_argument(
+    target = parser.add_argument_group("评论目标")
+    target.add_argument("url", metavar="URL", help="普通视频链接、b23.tv 短链或 BV/AV 号")
+    order = parser.add_argument_group("排序")
+    order.add_argument(
         "--sort",
         choices=("newest", "hot"),
         default="newest",
-        help="comment order; hot pagination is session-bound (default: newest)",
+        help="newest = 最新（默认）；hot = 热门",
     )
     _add_comment_options(parser, thread=False)
     return parser
 
 
 def _build_replies_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="bili-dl replies",
-        description="Download one root comment and all child replies as UTF-8 JSON.",
+    parser = _help_parser(
+        "bili-dl replies",
+        usage="%(prog)s [选项] URL ROOT_ID",
+        description="""\
+导出一条主评论及其全部楼中楼为 UTF-8 JSON。
+
+示例：
+  bili-dl replies BV1cSec6tEux 317745878352
+  bili-dl replies BV1cSec6tEux 317745878352 --limit 50
+
+ROOT_ID 从 comments 导出的 JSON 中 comments 数组的 rpid_str 字段获取，
+它是主评论的 ID。--limit 50 表示最多保存主评论及 49 条子回复。
+需要有效登录；无需 yt-dlp / ffmpeg。失败或中断时保留旧文件，暂不支持续传。""",
+        epilog=f"{_output_help()}\n\n{_session_help()}",
     )
-    parser.add_argument("url", help="Bilibili video URL, BV number or av number")
-    parser.add_argument("root_id", type=_positive_int, help="root comment ID from main comments")
+    target = parser.add_argument_group("评论目标")
+    target.add_argument("url", metavar="URL", help="普通视频链接、b23.tv 短链或 BV/AV 号")
+    target.add_argument(
+        "root_id", type=_positive_int, metavar="ROOT_ID", help="主评论 ID（rpid_str），为正整数"
+    )
     _add_comment_options(parser, thread=True)
     return parser
 

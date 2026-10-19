@@ -32,9 +32,36 @@ def test_every_parser_formats_help_without_crashing() -> None:
     # argparse interpolates help strings with params at format time; a bare "%"
     # (e.g. "~5% of the size") raises "badly formed help string" on formats and,
     # since Python 3.14, even at add_argument time. Regression for that release.
-    for builder in (cli._build_parser, cli._build_comments_parser, cli._build_replies_parser):
+    for builder in (
+        cli._build_parser,
+        cli._build_login_parser,
+        cli._build_comments_parser,
+        cli._build_replies_parser,
+    ):
         text = builder().format_help()
         assert "usage" in text
+
+
+def test_help_uses_symbolic_paths_for_all_platforms(monkeypatch: pytest.MonkeyPatch) -> None:
+    def personal_path() -> Path:
+        raise AssertionError("help must not resolve personal directories")
+
+    for name in ("config_dir", "config_file_path", "default_video_dir", "default_audio_dir"):
+        monkeypatch.setattr(cli, name, personal_path)
+    for builder in (
+        cli._build_parser,
+        cli._build_login_parser,
+        cli._build_comments_parser,
+        cli._build_replies_parser,
+    ):
+        text = builder().format_help()
+        assert all(system in text for system in ("Windows", "macOS", "Linux"))
+        assert r"%APPDATA%\bili-dl" in text
+        assert "~/Library/Application Support/bili-dl" in text
+        assert "$XDG_CONFIG_HOME/bili-dl" in text
+        if builder is not cli._build_login_parser:
+            assert "%USERPROFILE%" in text
+            assert "$XDG_DOWNLOAD_DIR/bilibili_videos" in text
 
 
 def test_video_mode() -> None:
@@ -540,7 +567,8 @@ def test_help_has_examples_and_url() -> None:
     """--help text includes examples and issues link (clig.dev §Help)."""
     parser = _build_parser()
     help_text = parser.format_help()
-    assert "examples:" in help_text.lower() or "example" in help_text.lower()
+    assert "示例" in help_text
+    assert help_text.index("示例") < help_text.index("下载模式")
     assert "github.com/Echoziness/bili-dl" in help_text
 
 

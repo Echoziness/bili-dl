@@ -144,7 +144,7 @@ entries, extracts only those, and reuses them thereafter. Override with
 bili-dl                                       # interactive REPL
 bili-dl https://www.bilibili.com/video/BV...   # one-shot (video + audio)
 bili-dl -a https://www.bilibili.com/video/BV...  # audio only
-bili-dl -v https://www.bilibili.com/video/BV...  # video only
+bili-dl -v https://www.bilibili.com/video/BV...  # video with sound, no separate audio
 bili-dl -s https://www.bilibili.com/video/BV...  # subtitle only (SRT)
 bili-dl --batch-file urls.txt                  # batch: download all URLs in file
 bili-dl --status                               # inspect login / renewal status
@@ -159,6 +159,29 @@ bili-dl replies BV... ROOT_ID                  # one complete reply thread
 | Linux | `~/Downloads/bilibili_videos` | `~/Downloads/bilibili_audio` |
 
 Override with `--output-dir` / `--audio-dir`.
+
+Built-in help is in Chinese, with examples, grouped options and symbolic default
+paths for Windows, macOS and Linux. It does not expand the local username or
+environment-specific paths. Use `bili-dl --help` for an overview, or
+`bili-dl login --help`, `bili-dl comments --help` and `bili-dl replies --help`
+for each command. Put shared options after the subcommand, for example
+`bili-dl comments BV... --config my.toml`. `--output-dir` changes the video,
+subtitle or comment destination; audio downloads and audio extracted by
+`--all` use `--audio-dir`.
+
+The config file is not generated automatically. Login/import creates the Cookie
+file as needed; QR login also stores renewal state when available. These files
+and the session lock share the Cookie directory. `--cookie-dir` does not move
+the config file; select a different config file with `--config`.
+
+Directory support currently has these boundaries:
+
+- Windows media paths use `~/Videos` and `~/Music`; redirected Known Folders
+  are not detected. Use `--output-dir` / `--audio-dir` for those locations.
+- Linux reads `XDG_CONFIG_HOME` and the `XDG_DOWNLOAD_DIR` environment variable,
+  but does not read `user-dirs.dirs`. Without the latter environment variable,
+  downloads go to `~/Downloads`. Session files remain beside the config rather
+  than in a separate XDG state/data directory.
 
 ### Subtitles
 
@@ -305,10 +328,12 @@ Both comment commands also accept `--full` to save raw comment objects (default:
 | Flag | Description |
 |------|-------------|
 | `--all` | video + audio, merged MP4 + extracted M4A (default) |
-| `-v`, `--video` | video only (MP4) |
+| `-v`, `--video` | video with sound, without extracting a separate audio file |
 | `-a`, `--audio` | audio only (M4A, faststart ISOM) |
 | `-s`, `--subtitle` | first returned subtitle track only (UTF-8 SRT with timestamps) |
 | `--output-dir DIR` | output directory for videos and subtitles |
+| `--audio-dir DIR` | output directory for downloaded or extracted audio |
+| `--cookie-dir DIR` | Cookie and session-state directory; does not move the config file |
 | `-k`, `--insecure` | skip yt-dlp TLS verification; login/session APIs remain verified |
 | `--proxy URL` | proxy for downloads and Bilibili APIs (env: `HTTPS_PROXY`/`HTTP_PROXY`) |
 | `--no-color` | disable colored output (also: `NO_COLOR` env var) |

@@ -182,7 +182,7 @@
 - **现象**：`bili-dl --all` 下载视频成功，但音频提取/容器修复失败。首个报错 `[out#0/ipod] Could not write header ... Bad file descriptor`，随后连锁 `UnicodeDecodeError: 'gbk' codec ...` 和 `'NoneType' object has no attribute 'strip'`——三个错误看似三种 bug，实则全是同一根因的连锁反应。
 - **根因**：Windows Defender **受控文件夹访问（Controlled Folder Access, CFA）** 已启用（注册表 `EnableControlledFolderAccess=1`）。CFA 拦截**未签名**程序写入库目录（`~/Videos`、`~/Music` 等），且**静默伪装**——不是返回"拒绝访问"，而是让程序看到 `No such file or directory`（PowerShell `Set-Content` 同样报 `Could not find file`，而 cmd/Python 能写，极具迷惑性）。
 - **触发条件**：ffmpeg 升级换新二进制即触发（旧版曾放行/白名单过，新版 9.0.1 未签名被判未知）。`yt-dlp`/miniforge `python.exe` 也全部 `NotSigned`。**任何"换了个 exe"的操作都可能再次触发。**
-- **关键坑（junction）**：scoop 的 `current` 是 junction 指向真实版本目录（`C:\Users\16697\scoop\apps\ffmpeg\current` → `...\9.0.1`）。CFA 事件日志记录的是**解析后的真实路径** `...\ffmpeg\9.0.1\bin\ffmpeg.exe`，因此把 `current\bin\ffmpeg.exe` 加入 `Add-MpPreference -ControlledFolderAccessAllowedApplications` **无效**——必须加真实版本路径。ffmpeg 升级换版本号后需重加。
+- **关键坑（junction）**：scoop 的 `current` 是 junction 指向真实版本目录（`%USERPROFILE%\scoop\apps\ffmpeg\current` → `...\9.0.1`）。CFA 事件日志记录的是**解析后的真实路径** `...\ffmpeg\9.0.1\bin\ffmpeg.exe`，因此把 `current\bin\ffmpeg.exe` 加入 `Add-MpPreference -ControlledFolderAccessAllowedApplications` **无效**——必须加真实版本路径。ffmpeg 升级换版本号后需重加。
 - **解法**：管理员 `Add-MpPreference -ControlledFolderAccessAllowedApplications <真实路径>` 白名单 ffmpeg/ffprobe/ffplay（PowerShell 7 提权：`Start-Process powershell -Verb RunAs -EncodedCommand`）。或 Windows 安全中心 GUI → 受控文件夹访问 → 允许应用。验证：`ffmpeg -y -i in.m4a -map 0:a -c:a copy out.m4a` 写入 `~/Music` 成功。
 - **定位方法**：查 `Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-Windows Defender/Operational'; Id=1123}` 能看到精确的"已阻止...通过受控文件夹访问权限...路径..."事件，比猜错误码快得多。
 - **产品决策**：不因此改默认输出目录——CFA 是系统安全配置不是产品 bug，改目录（如 `~/Downloads`）只是绕开不根治，且破坏 Videos/Music 库目录的用户预期。README 加了 Windows 提示段落（v0.3.0），根治是用户自己放行。
@@ -221,7 +221,7 @@
 - **测试锚定**：`tests/test_transport.py` 覆盖 gzip JSON、gzip HTML、损坏 gzip 与原有未压缩响应。
 
 ### 2.28 `uv run` 的 `PYTHONHOME` 不得泄漏给外部 yt-dlp（v0.4.1 修正）
-- **现象**：仓库内执行 `uv run bili-dl -a URL` 时，预测阶段报 `AssertionError: SRE module mismatch`；同一个 `C:\Users\16697\miniforge3\Scripts\yt-dlp.exe` 在普通 PowerShell 中直接运行正常。
+- **现象**：仓库内执行 `uv run bili-dl -a URL` 时，预测阶段报 `AssertionError: SRE module mismatch`；同一个 `%USERPROFILE%\miniforge3\Scripts\yt-dlp.exe` 在普通 PowerShell 中直接运行正常。
 - **根因**：`uv run` 为项目的 uv Python 3.11 设置 `PYTHONHOME`，外部 yt-dlp 启动器实际绑定 Miniforge Python 3.14。子进程继承该变量后，3.14 解释器加载了 3.11 标准库，`_sre` 与 `re._compiler` 版本不匹配，甚至在 yt-dlp 解析参数前就崩溃。
 - **解法**：两个 yt-dlp 子进程都接收父环境的副本，但显式移除 `PYTHONHOME`，让外部可执行文件使用自身解释器与标准库。保留 `PATH`、代理及其他用户环境；不全局修改当前进程，也不影响原生 ffmpeg。
 - **测试锚定**：`tests/test_media.py::test_download_does_not_leak_pythonhome_to_external_ytdlp` 断言两个阶段均移除 `PYTHONHOME` 且保留无关环境变量；真实 `uv run` 预测调用已验证成功。
@@ -338,7 +338,7 @@ bili-dl/
 - **所有 dev 工具都在 `pyproject.toml` 的 `[dependency-groups] dev` 里声明**（pytest/ruff/mypy/coverage），`uv sync` 一键装齐。**禁止**直接往本机全局环境（miniforge 等）pip install 项目相关包——那会让 `uv run <tool>` 静默落到系统环境的旧包（§2.24 环境陷阱）。
 - **开发只通过 `uv run <cmd>`**，不裸用本机 `pytest`/`ruff`/`mypy`。判断标准：`uv run python -c "import shutil; print(shutil.which('ruff'))"` 应指向 `.venv\Scripts`。
 - 装新 dev 依赖：改 `pyproject.toml` 的 `[dependency-groups] dev` → `uv sync` → 提交 `pyproject.toml` + `uv.lock`。
-- `uv.lock` 必须随 pyproject.toml 一起提交（v0.2.6 起已提交，保证可复现构建）。
+- 依赖或锁解析条件变化时更新并提交 `uv.lock`；只改构建白名单等元数据时先确认锁文件无差异，不强行改写它。`uv.lock` 自 v0.2.6 起已跟踪，用于复现开发依赖解析。
 - 国内网络 `uv sync` 需走镜像：`uv sync --default-index "https://mirrors.aliyun.com/pypi/simple/"`（pypi.org 直连 TLS 经常握手失败）。换环境跑 sync 若网络超时，先加这个参数。
 - dev 组工具不进入发布包；正式运行时依赖以 `[project].dependencies` 为唯一事实来源。
 
@@ -355,8 +355,8 @@ SRT 磁盘输出统一使用 UTF-8 BOM + CRLF（所有平台）；测试须检�
 uv sync --default-index "https://mirrors.aliyun.com/pypi/simple/"  # 国内网络用镜像
 
 # 检验（全部走 .venv，绝不碰系统环境）
-uv run ruff check src tests
-uv run ruff format --check src tests
+uv run ruff check src tests scripts
+uv run ruff format --check src tests scripts
 uv run mypy src/bili_dl
 uv run pytest -q
 
@@ -376,9 +376,8 @@ ffprobe -v error -show_entries format=format_name:format_tags=major_brand,compat
 ffmpeg -v trace -i path.m4a -f null - 2>&1 | findstr /R "moov mdat"   # Win
 ffmpeg -v trace -i path.m4a -f null - 2>&1 | grep -E "moov|mdat"       # Unix
 
-# 构建（CI publish.yml 自动处理，本地调试用）
-uv pip install build
-uv run python -m build
+# 构建（CI publish.yml 自动处理；本地须按当前版本精确检查产物）
+uv build
 ```
 
 ## 6. 环境特异事实（开发者备注）
@@ -393,7 +392,7 @@ uv run python -m build
 ## 7. 发版流程（当前）
 > 任何一步不绿不得进入下一步。
 
-1. 平时将用户可见的变更写在 `CHANGELOG.md` 的 `[Unreleased]` 下；发版时仅在 `src/bili_dl/__init__.py` 手填新版本号（hatchling 动态读取），执行 `python scripts/release.py prepare`，由脚本归档本版段落、日期与比较链接，再执行 `python scripts/release.py check`。
+1. 平时将用户可见的变更写在 `CHANGELOG.md` 的 `[Unreleased]` 下；发版时仅在 `src/bili_dl/__init__.py` 手填新版本号（hatchling 动态读取），执行 `uv run python scripts/release.py prepare`，由脚本归档本版段落、日期与比较链接，再执行 `uv run python scripts/release.py check`。
 2. 检查 CHANGELOG 的本版内容与自动生成的比较链接；若本次没有用户可见变更，不创建空发布。
 3. 本地全量验证（**四项缺一不可**）：
    ```bash

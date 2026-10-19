@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.9] - 2026-10-19
+
+### Changed
+
+- All four CLI help pages now use Chinese task-oriented examples and grouped
+  options, with login guidance, configuration precedence and built-in paths.
+  Clarified that `-v` keeps the video's sound without extracting a separate
+  audio file, how to find a reply thread's root ID, and each command's limits.
+- Help now shows symbolic directory defaults for Windows, macOS and Linux,
+  without expanding personal paths. Documented which files are generated and
+  the boundaries of platform directory support.
+- Project guidance now uses symbolic home-directory examples and aligns its
+  development and release commands with the existing toolchain.
+
 ## [0.4.8] - 2026-10-15
 
 ### Fixed
@@ -673,7 +687,8 @@ the system *larger* without making it *simpler*.
 - `--version` is now exposed as `-V` (capital), since `-v` is taken by
   `--video`. Matches yt-dlp / curl / pip convention.
 
-[Unreleased]: https://github.com/Echoziness/bili-dl/compare/v0.4.8...HEAD
+[Unreleased]: https://github.com/Echoziness/bili-dl/compare/v0.4.9...HEAD
+[0.4.9]: https://github.com/Echoziness/bili-dl/compare/v0.4.8...v0.4.9
 [0.4.8]: https://github.com/Echoziness/bili-dl/compare/v0.4.7...v0.4.8
 [0.4.7]: https://github.com/Echoziness/bili-dl/compare/v0.4.6...v0.4.7
 [0.4.6]: https://github.com/Echoziness/bili-dl/compare/v0.4.5...v0.4.6
