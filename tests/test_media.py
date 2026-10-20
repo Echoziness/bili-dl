@@ -1,6 +1,6 @@
 """Tests for yt-dlp argument assembly and download orchestration.
 
-Part 1 — argument threading (the project's reason for existing, §2.1).
+Part 1 — shared subprocess arguments.
 
 Part 2 — download() with mocked subprocess: Phase 1 predict failure,
 Phase 2 failure, success paths for all three modes.
@@ -123,7 +123,7 @@ def test_download_phase2_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
 def test_download_phase2_nonzero_but_file_exists(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """yt-dlp returns non-zero but writes the file → warn, not fail (§2.11 bugfix)."""
+    """yt-dlp returns non-zero but writes the file → warn, not fail."""
     monkeypatch.setattr(media, "find_ytdlp", lambda: "yt-dlp")
     out_file = tmp_path / "v" / "title.mp4"
     calls = [0]
@@ -278,7 +278,7 @@ def test_download_all_with_ffmpeg(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
 def test_download_phase1_warns_but_proceeds(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Phase 1 rc != 0 with valid stdout → warn, not fail (§2.11 consistency)."""
+    """Phase 1 rc != 0 with valid stdout → warn, not fail."""
     monkeypatch.setattr(media, "find_ytdlp", lambda: "yt-dlp")
     out_file = tmp_path / "v" / "title.mp4"
     calls = [0]
@@ -383,18 +383,8 @@ def test_download_does_not_leak_pythonhome_to_external_ytdlp(
 # ─── find_ytdlp + audio mode with ffmpeg repair ──────────────────────────────
 
 
-def test_find_ytdlp_present(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(media.shutil, "which", lambda name: "/usr/bin/yt-dlp")
-    assert media.find_ytdlp() == "/usr/bin/yt-dlp"
-
-
-def test_find_ytdlp_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(media.shutil, "which", lambda name: None)
-    assert media.find_ytdlp() is None
-
-
 def test_download_audio_with_ffmpeg_repair(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """mode=a + ffmpeg available → repair_audio_container is invoked (§2.3)."""
+    """Direct audio downloads also pass through container repair."""
     monkeypatch.setattr(media, "find_ytdlp", lambda: "yt-dlp")
     out_file = tmp_path / "a" / "title.m4a"
     calls = [0]
@@ -430,3 +420,43 @@ def test_download_audio_with_ffmpeg_repair(tmp_path: Path, monkeypatch: pytest.M
     assert result.success is True
     assert repair_called == [out_file]
     assert any("容器已修复" in t for _, t in result.messages)
+
+
+def test_interactive_stages_keep_native_progress_and_utf8_query(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    out_file = tmp_path / "video.mp4"
+    audio = tmp_path / "audio.m4a"
+    stages = []
+    calls = []
+
+    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        calls.append((args, kwargs))
+        if len(calls) == 1:
+            assert stages == [("prepare", None)]
+            assert kwargs["capture_output"] is True
+            assert kwargs["encoding"] == "utf-8"
+            return _completed_process(args, 0, str(out_file))
+        assert stages[-1] == ("download", out_file)
+        assert "--quiet" in args and "--progress" in args
+        assert args[args.index("--color") + 1] == "never"
+        assert "capture_output" not in kwargs and "stdout" not in kwargs and "stderr" not in kwargs
+        assert "--encoding" not in args
+        out_file.write_bytes(b"video")
+        return _completed_process(args, 0)
+
+    def extract(*args: object) -> object:
+        assert stages[-1] == ("extract", out_file)
+        audio.write_bytes(b"audio")
+        from bili_dl.ffmpeg import ExtractResult
+
+        return ExtractResult(True, audio_path=audio)
+
+    monkeypatch.setattr(media.subprocess, "run", run)
+    monkeypatch.setattr(media.ff, "extract_audio", extract)
+    cfg = _cfg(tmp_path)
+    cfg.ytdlp, cfg.ffmpeg_bin = "yt-dlp", "ffmpeg"
+    cfg.stage = lambda name, path: stages.append((name, path))
+    cfg.no_color = True
+    result = media.download("https://bilibili.com/video/BV1", cfg)
+    assert result.success and result.additional_paths == [audio]

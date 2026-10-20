@@ -2,7 +2,7 @@
 
 Asserts that:
 * ``validate`` returns correct verdicts for missing/empty/no-SESSDATA files;
-* ``_nav_probe`` distinguishes network errors from HTTP errors (AGENTS.md §2.6);
+* ``_nav_probe`` distinguishes network errors from HTTP errors;
 * ``validate`` reports the *real* error cause (风控 vs 网络) on degradation;
 * ``ensure_cookie`` orchestrates validate → import → re-validate correctly.
 """
@@ -52,13 +52,21 @@ def test_validate_no_sessdata(tmp_path: Path) -> None:
     assert result.valid is False
 
 
-def test_ensure_cookie_imports_from_source(tmp_path: Path) -> None:
+def test_ensure_cookie_imports_from_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """ensure_cookie: no output file → import from source → re-validate."""
     src = tmp_path / "cookies_export.txt"
     src.write_text(DATA.read_text(encoding="utf-8"), encoding="utf-8")
+    probed = []
+
+    def nav(sessdata: str, *, proxy: str | None = None) -> tuple[dict, None]:
+        probed.append(sessdata)
+        return {"code": 0, "data": {"isLogin": True}}, None
+
+    monkeypatch.setattr(store, "_nav_probe", nav)
     result = store.ensure_cookie(tmp_path)
-    assert isinstance(result.ready, bool)
-    assert len(result.messages) > 0
+    assert result.ready is True
+    assert probed == ["abc%2C123%2Cdef"]
+    assert store.bili_cookie_path(tmp_path).is_file()
 
 
 def test_ensure_cookie_no_source(tmp_path: Path) -> None:
@@ -157,7 +165,7 @@ def test_validate_degrades_on_http_error_with_status(
 
 
 def test_validate_degrades_on_badjson(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """B站 returns non-JSON → report 'non-JSON', not '网络/SSL' (§2.20)."""
+    """B站 returns non-JSON → report 'non-JSON', not '网络/SSL'."""
     d = _make_cookie_dir(tmp_path)
     monkeypatch.setattr(
         store,
@@ -170,7 +178,7 @@ def test_validate_degrades_on_badjson(tmp_path: Path, monkeypatch: pytest.Monkey
     assert not any("网络" in t for _, t in result.messages)
 
 
-# ─── _extract_sessdata: precise field matching (§2.6 hardening) ──────────────
+# ─── _extract_sessdata: precise field matching ────────────────────────────
 
 
 def test_extract_sessdata_www_domain(tmp_path: Path) -> None:

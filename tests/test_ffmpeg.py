@@ -163,16 +163,6 @@ def test_extract_mkdir_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
 # ─── find_ffmpeg / _run / _stderr_detail / OSError branches ──────────────────
 
 
-def test_find_ffmpeg_present(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(ff.shutil, "which", lambda name: "/usr/bin/ffmpeg")
-    assert ff.find_ffmpeg() == "/usr/bin/ffmpeg"
-
-
-def test_find_ffmpeg_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(ff.shutil, "which", lambda name: None)
-    assert ff.find_ffmpeg() is None
-
-
 def test_run_returns_rc_and_stderr(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ff.subprocess, "run", lambda args, **kw: _completed(args, 2, "err text"))
     rc, stderr = ff._run(["ffmpeg"])

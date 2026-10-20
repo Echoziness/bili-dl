@@ -163,7 +163,7 @@ def test_find_source_no_bili(tmp_path: Path) -> None:
 
 
 def test_read_lines_oserror_returns_empty(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """I/O errors on read degrade to [] rather than crashing (§2.20)."""
+    """I/O errors on read degrade to [] rather than crashing."""
     f = tmp_path / "x.txt"
     f.write_text("ok\n", encoding="utf-8")
 
@@ -189,7 +189,7 @@ def test_import_multiple_candidates(tmp_path: Path) -> None:
 
 
 def test_import_write_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """OSError writing the output file → failure with reason (§2.20)."""
+    """OSError writing the output file → failure with reason."""
     src = tmp_path / "cookies_export.txt"
     src.write_text(DATA.read_text(encoding="utf-8"), encoding="utf-8")
 

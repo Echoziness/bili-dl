@@ -50,9 +50,7 @@ def _format_for(mode: str) -> str:
 def _common_args(cfg: DownloadConfig) -> list[str]:
     """Build the yt-dlp args shared by phase 1 (predict) and phase 2 (download).
 
-    Explicit parameter threading — the whole reason this project exists
-    (see AGENTS.md §2.1: the PowerShell scoping bug that silently dropped
-    these exact args). ``--proxy`` is always present because yt-dlp defines
+    ``--proxy`` is always present because yt-dlp defines
     an empty value as direct connection; omitting it would let the subprocess
     re-read inherited proxy environment variables after the CLI resolved an
     explicit ``proxy = ""``.
@@ -89,6 +87,8 @@ def download(url: str, cfg: DownloadConfig) -> DownloadResult:
     ytdlp_env.pop("PYTHONHOME", None)
 
     # Phase 1: predict output path (no download) -------------------------------
+    if cfg.stage:
+        cfg.stage("prepare", None)
     predict = subprocess.run(
         [
             ytdlp,
@@ -120,7 +120,7 @@ def download(url: str, cfg: DownloadConfig) -> DownloadResult:
     out_path = Path(predict.stdout.strip())
 
     # Phase 1 warnings (yt-dlp exit code is not a reliable failure
-    # signal — §2.11; same philosophy as Phase 2's file-exists check).
+    # signal; the path is available, as in Phase 2's file-exists check).
     predict_warn: list[tuple[str, str]] = []
     if predict.returncode != 0:
         predict_warn.append(
@@ -128,7 +128,16 @@ def download(url: str, cfg: DownloadConfig) -> DownloadResult:
         )
 
     # Phase 2: real download (inherit stdout/stderr for the progress bar) ----
-    result = subprocess.run([ytdlp, *common, "-f", fmt, *merge, "-o", tmpl, url], env=ytdlp_env)
+    presentation: list[str] = []
+    if cfg.stage:
+        # The caller stops its live display before handing over the terminal.
+        cfg.stage("download", out_path)
+        presentation = ["--quiet", "--progress"]
+        if cfg.no_color:
+            presentation += ["--color", "never"]
+    result = subprocess.run(
+        [ytdlp, *common, *presentation, "-f", fmt, *merge, "-o", tmpl, url], env=ytdlp_env
+    )
 
     if not out_path.exists():
         return DownloadResult(
@@ -143,6 +152,8 @@ def download(url: str, cfg: DownloadConfig) -> DownloadResult:
         if result.returncode != 0:
             msgs.append(("warn", f"[警告] yt-dlp 退出码 {result.returncode}（非零，但文件已生成）"))
         if cfg.ffmpeg_bin:
+            if cfg.stage:
+                cfg.stage("repair", out_path)
             repair = ff.repair_audio_container(out_path, cfg.ffmpeg_bin)
             msgs.extend(repair.messages)
         else:
@@ -156,9 +167,16 @@ def download(url: str, cfg: DownloadConfig) -> DownloadResult:
         video_msgs.append(
             ("warn", f"[警告] yt-dlp 退出码 {result.returncode}（非零，但文件已生成）")
         )
+    additional: list[Path] = []
     if cfg.mode == "all" and cfg.ffmpeg_bin:
+        if cfg.stage:
+            cfg.stage("extract", out_path)
         extract = ff.extract_audio(out_path, cfg.audio_dir, cfg.ffmpeg_bin)
         video_msgs.extend(extract.messages)
+        if extract.audio_path is not None:
+            additional.append(extract.audio_path)
     elif cfg.mode == "all":
         video_msgs.append(("warn", "[跳过] ffmpeg 不可用，跳过音频提取"))
-    return DownloadResult(success=True, messages=video_msgs, output_path=out_path)
+    return DownloadResult(
+        success=True, messages=video_msgs, output_path=out_path, additional_paths=additional
+    )

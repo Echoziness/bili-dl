@@ -22,6 +22,8 @@ flags provide per-invocation overrides.
 
 from __future__ import annotations
 
+import json
+import os
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -68,3 +70,31 @@ def load(path: Path) -> Settings:
         audio_dir=Path(data["audio_dir"]) if data.get("audio_dir") else None,
         cookie_dir=Path(data["cookie_dir"]) if data.get("cookie_dir") else None,
     )
+
+
+def export(path: Path, settings: Settings) -> None:
+    """Write a new, private TOML file; never overwrite an existing config.
+
+    Only our flat scalar schema is serialized. Existing hand-written TOML,
+    comments and unknown keys are preserved by choosing a different file.
+    """
+    lines = ["# bili-dl configuration; CLI flags override these defaults.", ""]
+    for key, value in vars(settings).items():
+        if value is None:
+            continue
+        serialized = (
+            str(value).lower()
+            if isinstance(value, bool)
+            else json.dumps(str(value), ensure_ascii=False)
+        )
+        lines.append(f"{key} = {serialized}")
+    payload = "\n".join(lines) + "\n"
+    tomllib.loads(payload)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as stream:
+            stream.write(payload)
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise

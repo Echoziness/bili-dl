@@ -30,6 +30,8 @@ dependencies = [
     "cryptography>=45",
     "filelock>=3.16",
     "qrcode>=8",
+    "questionary>=2.1,<3",
+    "rich>=14,<15",
 ]
 
 [project.scripts]
@@ -49,6 +51,7 @@ include = [
     "/src",
     "/scripts",
     "/tests",
+    "/docs",
     "/README.md",
     "/CHANGELOG.md",
     "/LICENSE",

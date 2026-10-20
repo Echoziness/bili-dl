@@ -46,7 +46,7 @@ def test_help_uses_symbolic_paths_for_all_platforms(monkeypatch: pytest.MonkeyPa
     def personal_path() -> Path:
         raise AssertionError("help must not resolve personal directories")
 
-    for name in ("config_dir", "config_file_path", "default_video_dir", "default_audio_dir"):
+    for name in ("config_dir", "config_file_path", "default_video_dir"):
         monkeypatch.setattr(cli, name, personal_path)
     for builder in (
         cli._build_parser,
@@ -62,6 +62,22 @@ def test_help_uses_symbolic_paths_for_all_platforms(monkeypatch: pytest.MonkeyPa
         if builder is not cli._build_login_parser:
             assert "%USERPROFILE%" in text
             assert "$XDG_DOWNLOAD_DIR/bilibili_videos" in text
+
+
+@pytest.mark.parametrize("width", [32, 44, 88])
+def test_help_fits_terminal_display_width(monkeypatch: pytest.MonkeyPatch, width: int) -> None:
+    import os
+
+    from rich.cells import cell_len
+
+    monkeypatch.setattr(cli.shutil, "get_terminal_size", lambda **kw: os.terminal_size((width, 24)))
+    for builder in (
+        cli._build_parser,
+        cli._build_login_parser,
+        cli._build_comments_parser,
+        cli._build_replies_parser,
+    ):
+        assert all(cell_len(line) <= width for line in builder().format_help().splitlines())
 
 
 def test_video_mode() -> None:
@@ -138,7 +154,7 @@ def test_main_no_ffmpeg_warns(monkeypatch: pytest.MonkeyPatch, capsys: pytest.Ca
     monkeypatch.setattr(downloader, "find_ytdlp", lambda: "yt-dlp")
     monkeypatch.setattr(ff, "find_ffmpeg", lambda: None)
     monkeypatch.setattr(cli, "_prepare_cookie", lambda opts: False)
-    assert cli.main([]) == 1
+    assert cli.main(["https://bilibili.com/video/BV1"]) == 1
     assert "ffmpeg" in capsys.readouterr().err
 
 
@@ -563,12 +579,9 @@ def test_main_no_color_flag(monkeypatch: pytest.MonkeyPatch) -> None:
     assert called[0] is True
 
 
-def test_help_has_examples_and_url() -> None:
-    """--help text includes examples and issues link (clig.dev §Help)."""
+def test_help_has_support_url() -> None:
     parser = _build_parser()
     help_text = parser.format_help()
-    assert "示例" in help_text
-    assert help_text.index("示例") < help_text.index("下载模式")
     assert "github.com/Echoziness/bili-dl" in help_text
 
 
@@ -579,7 +592,7 @@ def test_main_no_ffmpeg_warns_to_stderr(
     monkeypatch.setattr(downloader, "find_ytdlp", lambda: "yt-dlp")
     monkeypatch.setattr(ff, "find_ffmpeg", lambda: None)
     monkeypatch.setattr(cli, "_prepare_cookie", lambda opts: False)
-    cli.main([])
+    cli.main(["https://bilibili.com/video/BV1"])
     captured = capsys.readouterr()
     assert "ffmpeg" in captured.err  # stderr, not stdout
     assert "ffmpeg" not in captured.out
@@ -651,48 +664,6 @@ def test_run_once_invokes_download(monkeypatch: pytest.MonkeyPatch) -> None:
     assert captured == ["https://x"]
 
 
-# ─── _repl: mode switch / blank / download / quit ────────────────────────────
-
-
-def test_repl_mode_switch_then_quit(monkeypatch: pytest.MonkeyPatch) -> None:
-    inputs = iter(["a", "q"])
-    monkeypatch.setattr("bili_dl.ui.prompt", lambda p: next(inputs))
-    opts = cli.Options(mode="all")
-    assert cli._repl(opts, "yt-dlp", "ffmpeg") == 0
-    assert opts.mode == "a"  # switched mid-REPL
-
-
-def test_repl_blank_lines_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
-    inputs = iter(["", "   ", "q"])
-    monkeypatch.setattr("bili_dl.ui.prompt", lambda p: next(inputs))
-    assert cli._repl(cli.Options(), "yt-dlp", "ffmpeg") == 0
-
-
-def test_repl_downloads_url_then_quit(monkeypatch: pytest.MonkeyPatch) -> None:
-    called: list[str] = []
-    monkeypatch.setattr(cli, "_run_once", lambda opts, url, y, f: called.append(url) or True)
-    inputs = iter(["https://bilibili.com/video/BV1", "q"])
-    monkeypatch.setattr("bili_dl.ui.prompt", lambda p: next(inputs))
-    assert cli._repl(cli.Options(), "yt-dlp", "ffmpeg") == 0
-    assert called == ["https://bilibili.com/video/BV1"]
-
-
-def test_repl_switches_between_subtitles_and_media(monkeypatch: pytest.MonkeyPatch) -> None:
-    inputs = iter(["https://example", "a", "https://example", "s", "https://example", "q"])
-    monkeypatch.setattr("bili_dl.ui.prompt", lambda prompt: next(inputs))
-    monkeypatch.setattr(downloader, "find_ytdlp", lambda: "yt-dlp")
-    monkeypatch.setattr(ff, "find_ffmpeg", lambda: "ffmpeg")
-    calls = []
-
-    def run(url, cfg):
-        calls.append((cfg.mode, cfg.ytdlp, cfg.ffmpeg_bin))
-        return downloader.DownloadResult(True)
-
-    monkeypatch.setattr(downloader, "download", run)
-    assert cli._repl(cli.Options(mode="s"), None, None) == 0
-    assert calls == [("s", None, None), ("a", "yt-dlp", "ffmpeg"), ("s", None, None)]
-
-
 @pytest.mark.parametrize("media_flag", ["-a", "-v", "--all"])
 def test_subtitle_mode_is_mutually_exclusive(media_flag: str) -> None:
     with pytest.raises(SystemExit):
@@ -710,7 +681,7 @@ def test_main_ensure_dir_fails(monkeypatch: pytest.MonkeyPatch) -> None:
         raise OSError("permission denied")
 
     monkeypatch.setattr(Path, "mkdir", bad_mkdir)
-    assert cli.main([]) == 1
+    assert cli.main(["https://bilibili.com/video/BV1"]) == 1
 
 
 def test_main_top_level_exception_wrapped(

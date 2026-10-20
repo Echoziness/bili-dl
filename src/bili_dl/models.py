@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -22,6 +23,8 @@ class DownloadConfig:
     ytdlp: Optional[str] = None
     ffmpeg_bin: Optional[str] = None
     referer: str = REFERER
+    stage: Optional[Callable[[str, Optional[Path]], None]] = None
+    no_color: bool = False
 
 
 @dataclass
@@ -31,3 +34,4 @@ class DownloadResult:
     success: bool
     messages: list[tuple[str, str]] = field(default_factory=list)
     output_path: Optional[Path] = None
+    additional_paths: list[Path] = field(default_factory=list)

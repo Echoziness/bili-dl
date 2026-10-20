@@ -340,7 +340,7 @@ def test_comments_cli_forwards_limit_sort_and_shared_options(
     captured: list[tuple[str, comments.CommentConfig]] = []
     monkeypatch.setattr(cli, "_prepare_cookie", lambda opts: True)
     monkeypatch.setattr(
-        cli.comments,
+        comments,
         "download_main",
         lambda url, cfg: captured.append((url, cfg)) or DownloadResult(True),
     )
@@ -391,7 +391,7 @@ def test_replies_cli_includes_root_in_limit_and_propagates_failure(
         captured.append((url, root_id, cfg))
         return DownloadResult(False, [("error", "expected failure")])
 
-    monkeypatch.setattr(cli.comments, "download_replies", fail)
+    monkeypatch.setattr(comments, "download_replies", fail)
 
     result = cli.main(
         [
@@ -427,7 +427,7 @@ def test_comments_cli_reuses_config_dirs_and_explicitly_disabled_proxy(
     captured: list[comments.CommentConfig] = []
     monkeypatch.setattr(cli, "_prepare_cookie", lambda opts: prepared.append(opts) or True)
     monkeypatch.setattr(
-        cli.comments,
+        comments,
         "download_main",
         lambda url, cfg: captured.append(cfg) or DownloadResult(True),
     )
@@ -809,7 +809,7 @@ def test_comments_cli_forwards_full_flag(tmp_path: Path, monkeypatch: pytest.Mon
     captured: list[comments.CommentConfig] = []
     monkeypatch.setattr(cli, "_prepare_cookie", lambda opts: True)
     monkeypatch.setattr(
-        cli.comments,
+        comments,
         "download_main",
         lambda url, cfg: captured.append(cfg) or DownloadResult(True),
     )

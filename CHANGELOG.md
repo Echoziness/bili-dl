@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-20
+
+### Added
+
+- Guided Chinese interactive menus for media, subtitles, comments, reply
+  threads, batch downloads, explicit QR login, account status and session
+  settings. Task summaries, structured output lists, login recovery and
+  failed-only batch retries make the workflow discoverable without CLI syntax.
+- Explicit configuration export creates a new TOML file without overwriting
+  existing settings or persisting proxy authentication.
+
+### Changed
+
+- The interactive home opens without login, network or downloader checks.
+  Rich and Questionary provide presentation and input, with numbered menus
+  for dumb terminals or redirected output and clean cancellation back to home.
+- Interactive navigation now refreshes the current page and shows a location
+  breadcrumb. Forms retain concise answers; informational results wait for
+  return, while failed native downloads keep their diagnostics visible.
+- Terminal zoom and resizing reflow the page and input together, preserving
+  menu selection and typed text. Compact cards and scrollable page content
+  keep small viewports usable; login never displays a clipped QR image.
+- Media downloads retain the UTF-8 pre-query and yt-dlp's native progress;
+  live UI updates stop before the subprocess owns the terminal. CLI and
+  interactive controllers share operations without importing UI in backends.
+- Reorganized all four help pages into examples, options, usage notes and
+  default directories. Chinese text, paths and usage lines wrap to terminal
+  display width; repeated explanations are condensed.
+- Rebuilt the Chinese README around an actual interactive-menu preview,
+  installation and task examples; detailed behavior lives in a separate guide.
+
 ## [0.4.9] - 2026-10-19
 
 ### Changed
@@ -687,7 +718,8 @@ the system *larger* without making it *simpler*.
 - `--version` is now exposed as `-V` (capital), since `-v` is taken by
   `--video`. Matches yt-dlp / curl / pip convention.
 
-[Unreleased]: https://github.com/Echoziness/bili-dl/compare/v0.4.9...HEAD
+[Unreleased]: https://github.com/Echoziness/bili-dl/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/Echoziness/bili-dl/compare/v0.4.9...v0.5.0
 [0.4.9]: https://github.com/Echoziness/bili-dl/compare/v0.4.8...v0.4.9
 [0.4.8]: https://github.com/Echoziness/bili-dl/compare/v0.4.7...v0.4.8
 [0.4.7]: https://github.com/Echoziness/bili-dl/compare/v0.4.6...v0.4.7

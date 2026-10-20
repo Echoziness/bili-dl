@@ -4,7 +4,7 @@ Covers:
 * missing file → empty Settings
 * complete config → all fields populated
 * partial config → only set fields populated, rest None
-* empty proxy string → treated as None
+* empty proxy string → explicit direct connection
 * malformed TOML → TOMLDecodeError propagated to caller
 """
 
@@ -17,6 +17,28 @@ import pytest
 
 from bili_dl import settings
 from bili_dl.settings import Settings
+
+
+def test_export_roundtrips_paths_and_explicit_direct_connection(tmp_path: Path) -> None:
+    path = tmp_path / "配置.toml"
+    original = Settings(
+        mode="s",
+        proxy="",
+        insecure=False,
+        video_dir=tmp_path / '带空格和"引号"的目录',
+        audio_dir=Path(r"C:\Music\bilibili_audio"),
+    )
+    settings.export(path, original)
+    assert settings.load(path) == original
+
+
+def test_export_never_overwrites_existing_config(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    payload = b'# personal comment\nproxy = ""\n'
+    path.write_bytes(payload)
+    with pytest.raises(FileExistsError):
+        settings.export(path, Settings(mode="a"))
+    assert path.read_bytes() == payload
 
 
 def test_load_missing_file(tmp_path: Path) -> None:
