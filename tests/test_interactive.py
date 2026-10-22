@@ -47,7 +47,7 @@ def app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> interactive.Interact
     monkeypatch.setattr(
         cookiestore, "ensure_cookie", lambda *a, **kw: cookiestore.EnsureResult(True)
     )
-    monkeypatch.setattr(interactive.downloader, "find_ytdlp", lambda: "yt-dlp")
+    monkeypatch.setattr(interactive.downloader, "find_ytdlp", lambda: ("python", "-m", "yt_dlp"))
     monkeypatch.setattr(interactive.ff, "find_ffmpeg", lambda: "ffmpeg")
     return app
 
@@ -57,6 +57,7 @@ def test_home_requires_neither_network_nor_tools(monkeypatch: pytest.MonkeyPatch
         pytest.fail("home must not require a downloader or contact Bilibili")
 
     monkeypatch.setattr(interactive.downloader, "find_ytdlp", forbidden)
+    monkeypatch.setattr(interactive.ff, "find_ffmpeg", forbidden)
     monkeypatch.setattr(cookiestore, "ensure_cookie", forbidden)
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("bili_dl.ui.prompt", lambda p: "8")
@@ -66,8 +67,12 @@ def test_home_requires_neither_network_nor_tools(monkeypatch: pytest.MonkeyPatch
 
 def test_subtitle_journey_keeps_resolved_options(app: Any, monkeypatch: Any) -> None:
     captured = []
+    monkeypatch.setattr(
+        interactive.downloader, "find_ytdlp", lambda: pytest.fail("Media tool lookup")
+    )
+    monkeypatch.setattr(interactive.ff, "find_ffmpeg", lambda: pytest.fail("Media tool lookup"))
 
-    def download(opts: Options, url: str, **kwargs: Any) -> DownloadResult:
+    def download(opts: Options, url: str, *_tools: Any, **kwargs: Any) -> DownloadResult:
         captured.append((opts.mode, opts.proxy, opts.cookie_dir, url))
         kwargs["stage"]("subtitle", None)
         return DownloadResult(True, output_path=opts.video_dir / "字幕.srt")
@@ -83,7 +88,7 @@ def test_subtitle_journey_keeps_resolved_options(app: Any, monkeypatch: Any) -> 
 def test_comment_journeys_forward_every_option(app: Any, monkeypatch: Any, thread: bool) -> None:
     captured = []
 
-    def download(opts: Options, url: str, **kwargs: Any) -> DownloadResult:
+    def download(opts: Options, url: str, *_tools: Any, **kwargs: Any) -> DownloadResult:
         captured.append((opts, url, kwargs))
         kwargs["progress"](2, 50, 10000)
         return DownloadResult(True)
@@ -113,7 +118,7 @@ def test_login_recovery_continues_original_task(app: Any, monkeypatch: Any) -> N
     monkeypatch.setattr(
         actions,
         "download_media",
-        lambda opts, url, **kw: downloads.append(url) or DownloadResult(True),
+        lambda opts, url, *_tools, **kw: downloads.append(url) or DownloadResult(True),
     )
     app.terminal = ScriptedTerminal(["download", "s", "start", "login", "home", "exit"], [BV])
     assert app.run() == 0
@@ -133,8 +138,15 @@ def test_batch_retry_only_repeats_failed_urls(app: Any, monkeypatch: Any, tmp_pa
     batch = tmp_path / "video list.txt"
     batch.write_text(f"# sample\n{BV}\nav123\n", encoding="utf-8")
     calls = []
+    tools = []
+    command = ("python", "-m", "yt_dlp")
+    monkeypatch.setattr(
+        interactive.downloader, "find_ytdlp", lambda: tools.append("yt-dlp") or command
+    )
+    monkeypatch.setattr(interactive.ff, "find_ffmpeg", lambda: tools.append("ffmpeg") or "ffmpeg")
 
-    def download(opts: Options, url: str, **kwargs: Any) -> DownloadResult:
+    def download(opts: Options, url: str, *_tools: Any, **kwargs: Any) -> DownloadResult:
+        assert _tools == (command, "ffmpeg")
         calls.append(url)
         return DownloadResult(len(calls) != 2)
 
@@ -146,6 +158,7 @@ def test_batch_retry_only_repeats_failed_urls(app: Any, monkeypatch: Any, tmp_pa
         "https://www.bilibili.com/video/av123",
         "https://www.bilibili.com/video/av123",
     ]
+    assert tools == ["yt-dlp", "ffmpeg", "yt-dlp", "ffmpeg"]
 
 
 @pytest.mark.parametrize("signal", [KeyboardInterrupt(), Back(), EOFError()])

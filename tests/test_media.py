@@ -9,6 +9,7 @@ Phase 2 failure, success paths for all three modes.
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -37,6 +38,7 @@ def test_common_args_basic(tmp_path: Path) -> None:
     cfg = _cfg(tmp_path)
     args = media._common_args(cfg)
     assert "--no-playlist" in args
+    assert "--ignore-config" in args
     assert "--retries" in args
     idx = args.index("--cookies")
     assert args[idx + 1] == str(cfg.cookie_path)
@@ -60,6 +62,67 @@ def test_common_args_insecure(tmp_path: Path) -> None:
     assert "--no-check-certificate" in args
 
 
+def test_unavailable_explicit_ffmpeg_prevents_child_system_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    missing = str(tmp_path / "missing-ffmpeg")
+    monkeypatch.setenv("IMAGEIO_FFMPEG_EXE", missing)
+    cfg = _cfg(tmp_path)
+    args = media._common_args(cfg)
+    assert args[args.index("--ffmpeg-location") + 1] == missing
+
+
+def test_dependency_command_uses_current_python(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PATH", "")
+    assert media.find_ytdlp() == (sys.executable, "-m", "yt_dlp")
+    monkeypatch.setattr(media.importlib.util, "find_spec", lambda name: None)
+    assert media.find_ytdlp() is None
+
+
+@pytest.mark.parametrize("stdout", ["part1.flv\npart2.flv\n", "same.flv\nsame.flv\n"])
+def test_multiple_targets_stop_before_download(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stdout: str
+) -> None:
+    calls = []
+
+    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        calls.append(args)
+        return _completed_process(args, 0, stdout)
+
+    monkeypatch.setattr(media.subprocess, "run", run)
+    cfg = _cfg(tmp_path)
+    cfg.ytdlp = (sys.executable, "-m", "yt_dlp")
+    result = media.download("https://www.bilibili.com/video/BV1", cfg)
+    assert not result.success and result.output_path is None
+    assert len(calls) == 1 and "--skip-download" in calls[0]
+    assert any("多个输出目标" in message for _, message in result.messages)
+
+
+def test_both_phases_use_same_command_and_ffmpeg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output = tmp_path / "video.mp4"
+    cfg = _cfg(tmp_path)
+    cfg.mode = "v"
+    cfg.ytdlp = (sys.executable, "-m", "yt_dlp")
+    cfg.ffmpeg_bin = str(tmp_path / "space dir" / "ffmpeg-version.exe")
+    calls = []
+
+    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        calls.append(args)
+        if "--skip-download" in args:
+            return _completed_process(args, 0, str(output))
+        output.write_bytes(b"video")
+        return _completed_process(args, 0)
+
+    monkeypatch.setattr(media.subprocess, "run", run)
+    assert media.download("https://www.bilibili.com/video/BV1", cfg).success
+    assert len(calls) == 2
+    for args in calls:
+        assert args[:3] == list(cfg.ytdlp)
+        assert args[args.index("--ffmpeg-location") + 1] == cfg.ffmpeg_bin
+
+
 # ─── Part 2: download() with mocked subprocess ──────────────────────────────
 
 
@@ -78,7 +141,7 @@ def test_download_no_ytdlp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_download_phase1_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(media, "find_ytdlp", lambda: "yt-dlp")
+    monkeypatch.setattr(media, "find_ytdlp", lambda: ("python", "-m", "yt_dlp"))
 
     def fake_run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess:
         return _completed_process(args, 1)
@@ -89,14 +152,14 @@ def test_download_phase1_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
         video_dir=tmp_path / "v",
         audio_dir=tmp_path / "a",
         cookie_path=tmp_path / "c.txt",
-        ytdlp="yt-dlp",
+        ytdlp=("python", "-m", "yt_dlp"),
     )
     result = media.download("https://bilibili.com/video/BV1", cfg)
     assert result.success is False
 
 
 def test_download_phase2_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(media, "find_ytdlp", lambda: "yt-dlp")
+    monkeypatch.setattr(media, "find_ytdlp", lambda: ("python", "-m", "yt_dlp"))
     out_file = tmp_path / "v" / "title.mp4"
     calls = [0]
 
@@ -113,7 +176,7 @@ def test_download_phase2_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
         video_dir=tmp_path / "v",
         audio_dir=tmp_path / "a",
         cookie_path=tmp_path / "c.txt",
-        ytdlp="yt-dlp",
+        ytdlp=("python", "-m", "yt_dlp"),
         ffmpeg_bin=None,
     )
     result = media.download("https://bilibili.com/video/BV1", cfg)
@@ -124,7 +187,7 @@ def test_download_phase2_nonzero_but_file_exists(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """yt-dlp returns non-zero but writes the file → warn, not fail."""
-    monkeypatch.setattr(media, "find_ytdlp", lambda: "yt-dlp")
+    monkeypatch.setattr(media, "find_ytdlp", lambda: ("python", "-m", "yt_dlp"))
     out_file = tmp_path / "v" / "title.mp4"
     calls = [0]
 
@@ -143,7 +206,7 @@ def test_download_phase2_nonzero_but_file_exists(
         video_dir=tmp_path / "v",
         audio_dir=tmp_path / "a",
         cookie_path=tmp_path / "c.txt",
-        ytdlp="yt-dlp",
+        ytdlp=("python", "-m", "yt_dlp"),
         ffmpeg_bin=None,
     )
     result = media.download("https://bilibili.com/video/BV1", cfg)
@@ -152,7 +215,7 @@ def test_download_phase2_nonzero_but_file_exists(
 
 
 def test_download_video_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(media, "find_ytdlp", lambda: "yt-dlp")
+    monkeypatch.setattr(media, "find_ytdlp", lambda: ("python", "-m", "yt_dlp"))
     out_file = tmp_path / "v" / "title.mp4"
     calls = [0]
 
@@ -171,7 +234,7 @@ def test_download_video_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
         video_dir=tmp_path / "v",
         audio_dir=tmp_path / "a",
         cookie_path=tmp_path / "c.txt",
-        ytdlp="yt-dlp",
+        ytdlp=("python", "-m", "yt_dlp"),
         ffmpeg_bin=None,
     )
     result = media.download("https://bilibili.com/video/BV1", cfg)
@@ -180,7 +243,7 @@ def test_download_video_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
 
 
 def test_download_audio_no_ffmpeg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(media, "find_ytdlp", lambda: "yt-dlp")
+    monkeypatch.setattr(media, "find_ytdlp", lambda: ("python", "-m", "yt_dlp"))
     out_file = tmp_path / "a" / "title.m4a"
     calls = [0]
 
@@ -198,7 +261,7 @@ def test_download_audio_no_ffmpeg(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         video_dir=tmp_path / "v",
         audio_dir=tmp_path / "a",
         cookie_path=tmp_path / "c.txt",
-        ytdlp="yt-dlp",
+        ytdlp=("python", "-m", "yt_dlp"),
         ffmpeg_bin=None,
     )
     result = media.download("https://bilibili.com/video/BV1", cfg)
@@ -208,7 +271,7 @@ def test_download_audio_no_ffmpeg(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
 
 
 def test_download_all_no_ffmpeg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(media, "find_ytdlp", lambda: "yt-dlp")
+    monkeypatch.setattr(media, "find_ytdlp", lambda: ("python", "-m", "yt_dlp"))
     out_file = tmp_path / "v" / "title.mp4"
     calls = [0]
 
@@ -226,7 +289,7 @@ def test_download_all_no_ffmpeg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
         video_dir=tmp_path / "v",
         audio_dir=tmp_path / "a",
         cookie_path=tmp_path / "c.txt",
-        ytdlp="yt-dlp",
+        ytdlp=("python", "-m", "yt_dlp"),
         ffmpeg_bin=None,
     )
     result = media.download("https://bilibili.com/video/BV1", cfg)
@@ -236,7 +299,7 @@ def test_download_all_no_ffmpeg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
 
 
 def test_download_all_with_ffmpeg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(media, "find_ytdlp", lambda: "yt-dlp")
+    monkeypatch.setattr(media, "find_ytdlp", lambda: ("python", "-m", "yt_dlp"))
     out_file = tmp_path / "v" / "title.mp4"
     calls = [0]
 
@@ -267,7 +330,7 @@ def test_download_all_with_ffmpeg(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         video_dir=tmp_path / "v",
         audio_dir=tmp_path / "a",
         cookie_path=tmp_path / "c.txt",
-        ytdlp="yt-dlp",
+        ytdlp=("python", "-m", "yt_dlp"),
         ffmpeg_bin="ffmpeg",
     )
     result = media.download("https://bilibili.com/video/BV1", cfg)
@@ -279,7 +342,7 @@ def test_download_phase1_warns_but_proceeds(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Phase 1 rc != 0 with valid stdout → warn, not fail."""
-    monkeypatch.setattr(media, "find_ytdlp", lambda: "yt-dlp")
+    monkeypatch.setattr(media, "find_ytdlp", lambda: ("python", "-m", "yt_dlp"))
     out_file = tmp_path / "v" / "title.mp4"
     calls = [0]
 
@@ -298,7 +361,7 @@ def test_download_phase1_warns_but_proceeds(
         video_dir=tmp_path / "v",
         audio_dir=tmp_path / "a",
         cookie_path=tmp_path / "c.txt",
-        ytdlp="yt-dlp",
+        ytdlp=("python", "-m", "yt_dlp"),
         ffmpeg_bin=None,
     )
     result = media.download("https://bilibili.com/video/BV1", cfg)
@@ -328,7 +391,7 @@ def test_download_predict_uses_utf8_for_non_cp936_filename(
         video_dir=tmp_path / "v",
         audio_dir=tmp_path / "a",
         cookie_path=tmp_path / "c.txt",
-        ytdlp="yt-dlp",
+        ytdlp=("python", "-m", "yt_dlp"),
         ffmpeg_bin=None,
     )
 
@@ -342,10 +405,10 @@ def test_download_predict_uses_utf8_for_non_cp936_filename(
     assert "--encoding" not in calls[1][0]
 
 
-def test_download_does_not_leak_pythonhome_to_external_ytdlp(
+def test_download_child_resolves_its_own_pythonhome(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """uv's interpreter home must not poison yt-dlp from another Python install."""
+    """The module child resolves stdlib from its own environment."""
     monkeypatch.setenv("PYTHONHOME", str(tmp_path / "uv-python"))
     monkeypatch.setenv("BILI_DL_TEST_ENV", "preserved")
     out_file = tmp_path / "a" / "title.m4a"
@@ -365,7 +428,7 @@ def test_download_does_not_leak_pythonhome_to_external_ytdlp(
         video_dir=tmp_path / "v",
         audio_dir=tmp_path / "a",
         cookie_path=tmp_path / "c.txt",
-        ytdlp="yt-dlp",
+        ytdlp=("python", "-m", "yt_dlp"),
         ffmpeg_bin=None,
     )
 
@@ -385,7 +448,7 @@ def test_download_does_not_leak_pythonhome_to_external_ytdlp(
 
 def test_download_audio_with_ffmpeg_repair(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Direct audio downloads also pass through container repair."""
-    monkeypatch.setattr(media, "find_ytdlp", lambda: "yt-dlp")
+    monkeypatch.setattr(media, "find_ytdlp", lambda: ("python", "-m", "yt_dlp"))
     out_file = tmp_path / "a" / "title.m4a"
     calls = [0]
 
@@ -413,7 +476,7 @@ def test_download_audio_with_ffmpeg_repair(tmp_path: Path, monkeypatch: pytest.M
         video_dir=tmp_path / "v",
         audio_dir=tmp_path / "a",
         cookie_path=tmp_path / "c.txt",
-        ytdlp="yt-dlp",
+        ytdlp=("python", "-m", "yt_dlp"),
         ffmpeg_bin="ffmpeg",
     )
     result = media.download("https://bilibili.com/video/BV1", cfg)
@@ -455,7 +518,7 @@ def test_interactive_stages_keep_native_progress_and_utf8_query(
     monkeypatch.setattr(media.subprocess, "run", run)
     monkeypatch.setattr(media.ff, "extract_audio", extract)
     cfg = _cfg(tmp_path)
-    cfg.ytdlp, cfg.ffmpeg_bin = "yt-dlp", "ffmpeg"
+    cfg.ytdlp, cfg.ffmpeg_bin = ("python", "-m", "yt_dlp"), "ffmpeg"
     cfg.stage = lambda name, path: stages.append((name, path))
     cfg.no_color = True
     result = media.download("https://bilibili.com/video/BV1", cfg)

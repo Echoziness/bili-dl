@@ -20,7 +20,7 @@ class DownloadConfig:
     cookie_path: Path
     proxy: str = ""
     insecure: bool = False
-    ytdlp: Optional[str] = None
+    ytdlp: Optional[tuple[str, ...]] = None
     ffmpeg_bin: Optional[str] = None
     referer: str = REFERER
     stage: Optional[Callable[[str, Optional[Path]], None]] = None

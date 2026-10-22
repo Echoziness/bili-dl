@@ -2,7 +2,54 @@
 
 [返回项目首页](../README.md)
 
-[登录与会话](#登录与会话) · [交互界面](#交互界面) · [字幕](#字幕) · [评论与楼中楼](#评论与楼中楼) · [目录与配置](#目录与配置) · [隐私与文件安全](#隐私与文件安全) · [常见问题](#常见问题)
+[安装与升级](#安装与升级) · [登录与会话](#登录与会话) · [交互界面](#交互界面) · [字幕](#字幕) · [评论与楼中楼](#评论与楼中楼) · [目录与配置](#目录与配置) · [隐私与文件安全](#隐私与文件安全) · [常见问题](#常见问题)
+
+## 安装与升级
+
+需要 Python 3.11+ 和 pipx：
+
+```bash
+pipx install bili-dl
+pipx upgrade bili-dl
+```
+
+yt-dlp 和 imageio-ffmpeg 是项目依赖，pipx 安装时一起获取。yt-dlp 由同一 Python 环境启动；FFmpeg 默认使用 imageio-ffmpeg 随 wheel 提供的可执行文件，不要求系统 PATH 中另有这两个命令。工具更新由包管理器完成，bili-dl 不自行下载或替换程序。
+
+需要重新解析并安装全部依赖时，可运行 `pipx reinstall bili-dl`，重建它的隔离环境。使用普通虚拟环境时，可运行 `python -m pip install --upgrade --upgrade-strategy eager bili-dl`，同时更新满足项目约束的依赖。
+
+### 系统与架构
+
+imageio-ffmpeg 0.6 系列的内置程序支持如下平台；还需满足 Python 3.11+ 自身的系统要求：
+
+| 系统 | 架构 | 内置 FFmpeg |
+| --- | --- | --- |
+| Windows | x86-64、x86 32 位 | 提供；32 位构建版本较旧 |
+| macOS | Intel x86-64 | 提供；wheel 标记 macOS 10.9+ |
+| macOS | Apple Silicon ARM64 | 提供；macOS 11+ |
+| Linux | x86-64、ARM64 / aarch64 | 提供；manylinux2014 / glibc 2.17+ |
+
+Windows 原生 ARM64、Alpine / musl、32 位 ARM / Linux 没有对应的内置程序包。在这些平台安装源码包不会自动下载 FFmpeg，可安装系统 FFmpeg 并加入 PATH，或按下面方式指定可执行文件。字幕、评论、登录与账号状态不需要运行媒体工具。
+
+### 指定外部 FFmpeg
+
+查找顺序为 `IMAGEIO_FFMPEG_EXE` > 包内程序 > 当前环境的 Conda FFmpeg > 系统 PATH。找到的同一个程序用于 yt-dlp 合并和 bili-dl 的音频处理。指定路径不需要连同 ffprobe 一起提供。
+
+PowerShell：
+
+```powershell
+$env:IMAGEIO_FFMPEG_EXE = 'C:\tools\ffmpeg\bin\ffmpeg.exe'
+bili-dl
+```
+
+macOS / Linux：
+
+```bash
+IMAGEIO_FFMPEG_EXE=/usr/local/bin/ffmpeg bili-dl
+```
+
+填写可执行文件路径，不要把参数写进变量。显式指定的程序不存在、无法执行或版本检查超时，将报告 FFmpeg 不可用，不悄悄改用另一个程序；可修正路径或清除变量以恢复自动查找。
+
+媒体任务固定忽略独立 yt-dlp 的配置文件。请通过 bili-dl 的选项和 `config.toml` 配置下载，避免其他程序的后处理设置影响结果。
 
 ## 登录与会话
 
@@ -212,7 +259,7 @@ bili-dl -s --batch-file urls.txt --output-dir ./subtitles
 
 如果开启 Windows Defender“受控文件夹访问”，未获允许的 ffmpeg 可能无法写入视频或音乐库，错误可能表现为 `No such file or directory` 或 `Bad file descriptor`。
 
-确认拦截后，在 **Windows 安全中心 → 病毒和威胁防护 → 勒索软件防护 → 受控文件夹访问 → 允许应用** 中添加需要的可执行文件。使用安装位置的真实路径；Scoop 的 `current` 是 junction，可能需要选择实际版本路径，如 `%USERPROFILE%\scoop\apps\ffmpeg\<version>\bin\ffmpeg.exe`。升级后路径变化时需重新检查。
+确认拦截后，在 **Windows 安全中心 → 病毒和威胁防护 → 勒索软件防护 → 受控文件夹访问 → 允许应用** 中添加需要的可执行文件。默认 FFmpeg 位于 pipx 环境的 `site-packages/imageio_ffmpeg/binaries/` 中；用 `pipx runpip bili-dl show imageio-ffmpeg` 查看安装位置，再在 `binaries` 中找到程序。使用外部 FFmpeg 时放行实际指定的程序；升级后路径变化时需重新检查。
 
 ### 进度已到 100%，为什么还在工作
 
@@ -221,6 +268,8 @@ yt-dlp 可能分别下载音频和视频，之后还需合并、提取音频或�
 ### 能否下载整个合集或跳过已有文件
 
 媒体下载固定使用 `--no-playlist`，不自动遍历合集、收藏夹或多分 P；请分别提供各分 P 链接或写入批量文件。当前没有已完成文件跳过或续传的产品选项；重新运行时可能下载或替换已有产物，请按目录安排保留需要的版本。
+
+旧式分段 FLV 可能把单个链接展开为多个输出目标。此类任务会在预查询后停止，不开始下载；批量文件中的其他链接仍按顺序处理。
 
 ### 如何报告问题
 

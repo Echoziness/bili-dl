@@ -1,6 +1,6 @@
-"""Tests for ffmpeg operations — mock subprocess to test all branches.
+"""Binary discovery and error handling for zero-copy ffmpeg operations.
 
-No real ffmpeg invoked. Covers:
+Remux failure branches use mocked subprocesses. Covers:
 * repair_audio_container: file missing / success / ffmpeg fails / temp too small / stderr in error
 * extract_audio: ffmpeg fails / success (two subprocess calls) / mkdir fails / stderr in error
 """
@@ -8,11 +8,72 @@ No real ffmpeg invoked. Covers:
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
+import imageio_ffmpeg
 import pytest
 
 from bili_dl import ffmpeg as ff
+
+
+def test_resolve_bundled_binary_without_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("IMAGEIO_FFMPEG_EXE", raising=False)
+    monkeypatch.setenv("PATH", "")
+    executable = ff.find_ffmpeg()
+    assert executable is not None and Path(executable).is_file()
+    assert Path(executable).parent == Path(imageio_ffmpeg.__file__).parent / "binaries"
+
+
+def test_external_ffmpeg_fallback_is_absolute(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    executable = str(tmp_path / "ffmpeg")
+    monkeypatch.delenv("IMAGEIO_FFMPEG_EXE", raising=False)
+    monkeypatch.setattr(imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
+    monkeypatch.setattr(ff.shutil, "which", lambda name: executable)
+    assert ff.find_ffmpeg() == executable
+
+
+def test_no_binary_is_a_supported_degradation(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("IMAGEIO_FFMPEG_EXE", raising=False)
+
+    def unavailable() -> str:
+        raise RuntimeError("no binary for this platform")
+
+    monkeypatch.setattr(imageio_ffmpeg, "get_ffmpeg_exe", unavailable)
+    assert ff.find_ffmpeg() is None
+
+
+@pytest.mark.parametrize(
+    "outcome", [0, 1, OSError("cannot execute"), subprocess.TimeoutExpired("ffmpeg", 5)]
+)
+def test_explicit_ffmpeg_override_is_validated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: object
+) -> None:
+    executable = str(tmp_path / "ffmpeg.exe")
+    monkeypatch.setenv("IMAGEIO_FFMPEG_EXE", executable)
+    monkeypatch.setattr(ff.shutil, "which", lambda name: executable)
+    calls = []
+
+    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        calls.append((args, kwargs))
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return subprocess.CompletedProcess(args, outcome)
+
+    monkeypatch.setattr(ff.subprocess, "run", run)
+    assert ff.find_ffmpeg() == (executable if outcome == 0 else None)
+    assert calls == [([executable, "-version"], {"capture_output": True, "timeout": 5})]
+
+
+def test_missing_override_does_not_silently_select_another_binary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("IMAGEIO_FFMPEG_EXE", "missing-ffmpeg")
+    monkeypatch.setattr(ff.shutil, "which", lambda name: None)
+    monkeypatch.setattr(imageio_ffmpeg, "get_ffmpeg_exe", lambda: pytest.fail("Explicit choice"))
+    assert ff.find_ffmpeg() is None
 
 
 def _completed(args: list[str], rc: int, stderr: str = "") -> subprocess.CompletedProcess:
@@ -168,6 +229,21 @@ def test_run_returns_rc_and_stderr(monkeypatch: pytest.MonkeyPatch) -> None:
     rc, stderr = ff._run(["ffmpeg"])
     assert rc == 2
     assert stderr == "err text"
+
+
+@pytest.mark.parametrize("payload", ["中文错误 🌟".encode(), b"\xffError opening input"])
+def test_captured_diagnostics_handle_unicode_and_invalid_bytes(payload: bytes) -> None:
+    command = [
+        sys.executable,
+        "-c",
+        f"import sys; sys.stderr.buffer.write({payload!r}); sys.exit(1)",
+    ]
+    rc, stderr = ff._run(command)
+    assert rc == 1 and stderr
+    if payload.startswith(b"\xff"):
+        assert "Error opening input" in stderr
+    else:
+        assert stderr == "中文错误 🌟"
 
 
 def test_stderr_detail_empty() -> None:

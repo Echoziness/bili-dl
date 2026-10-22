@@ -4,6 +4,13 @@
 
 [开发说明](development.md) · [面向使用者的常见问题](usage.md#常见问题)
 
+## FFmpeg 失败时 Unicode 路径触发解码异常
+
+- **范围与现象**：2026-10-22，Windows CP936、Python 3.11.16、imageio-ffmpeg 0.6.0 的 FFmpeg 7.1；修复名含中文 / emoji 的损坏 M4A 时，原文件保留，但诊断读取线程抛出 `UnicodeDecodeError`，后续访问 stderr 又触发异常。
+- **已确认原因**：FFmpeg 写入 UTF-8 诊断，`subprocess.run(text=True)` 默认按系统 GBK 解码。
+- **有效修复**：仅给捕获 FFmpeg 输出的调用设置 `encoding="utf-8", errors="replace"`，保留结构化失败与原文件，不改用户 stdio 或全局环境。
+- **验证入口**：`tests/test_ffmpeg.py::test_captured_diagnostics_handle_unicode_and_invalid_bytes`、`tests/test_media_integration.py::test_invalid_unicode_audio_keeps_original_and_returns_error`；包含有效 UTF-8、非法字节和真实损坏文件。
+
 ## 预查询文件名丢失 Unicode 字符
 
 - **范围与现象**：v0.4.1 修正，2026-09 的 Windows CP936 样本。标题中的 `⧸`（U+29F8）在预测输出中丢失，实际文件系统保留；因此下载成功却因预测路径不匹配报失败。
@@ -16,7 +23,7 @@
 - **范围与现象**：v0.4.1 修正；原开发环境中，`uv run` 下失败，而同一外部 yt-dlp 在普通终端正常。
 - **已确认原因**：项目解释器的 `PYTHONHOME` 被外部启动器继承，Python 3.14 加载了 3.11 标准库，尚未处理下载参数就崩溃。
 - **有效修复**：仅在两个 yt-dlp 子进程的环境副本中移除 `PYTHONHOME`，保留 PATH、代理和其他变量，不修改全局环境。
-- **验证入口**：`tests/test_media.py::test_download_does_not_leak_pythonhome_to_external_ytdlp`；真实复测需保留不同解释器绑定这一条件。
+- **验证入口**：`tests/test_media.py::test_download_child_resolves_its_own_pythonhome`。当前改为同一环境的 `python -m yt_dlp`，继续验证子进程移除 `PYTHONHOME`；历史故障涉及不同解释器绑定。
 
 ## nav 在线校验总是降级或返回 HTTP 412
 

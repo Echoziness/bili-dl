@@ -285,19 +285,24 @@ class Interactive:
         while True:
             terminal.page(f"首页 / {TASK_LABELS[task.kind]} / 执行任务")
             media = task.kind in {"download", "batch"} and task.opts.mode != "s"
-            if media and downloader.find_ytdlp() is None:
+            ytdlp = downloader.find_ytdlp() if media else None
+            ffmpeg_bin = ff.find_ffmpeg() if media else None
+            if media and ytdlp is None:
                 terminal.card(
                     "缺少下载工具",
                     [
                         ("需要", "yt-dlp"),
-                        ("安装", "uv tool install yt-dlp 或 pipx install yt-dlp"),
+                        ("修复", "重新安装 bili-dl，恢复缺失的 yt-dlp 依赖。"),
                         ("可用功能", "字幕、评论和登录不需要此工具。"),
                     ],
                 )
                 terminal.pause()
                 return False
-            if media and ff.find_ffmpeg() is None:
+            if media and ffmpeg_bin is None:
                 terminal.note("未找到 ffmpeg：合并、独立音频提取与容器修复可能不可用。", "yellow")
+                terminal.note(
+                    "检查 IMAGEIO_FFMPEG_EXE；无内置程序的平台可安装系统 ffmpeg 并加入 PATH。"
+                )
                 if not terminal.confirm("仍要尝试下载？"):
                     return False
             if not self.ready(task.opts):
@@ -314,7 +319,12 @@ class Interactive:
                         if task.opts.mode == "s":
                             terminal.stage("subtitle")
                         result = actions.download_media(
-                            task.opts, url, stage=terminal.stage, no_color=not terminal.color
+                            task.opts,
+                            url,
+                            ytdlp,
+                            ffmpeg_bin,
+                            stage=terminal.stage,
+                            no_color=not terminal.color,
                         )
                     else:
                         with terminal.busy("正在获取评论…"):

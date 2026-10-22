@@ -29,17 +29,21 @@ CLI 消息使用 stderr，帮助与版本使用 stdout；yt-dlp 保留自己的�
 
 ## 媒体与编码
 
-预查询必须同时给 yt-dlp 传 `--encoding utf-8`、给父进程设置 `encoding="utf-8"`；两端是同一个机器协议。下载阶段不强制改用户终端编码。两个 yt-dlp 调用继承环境副本，但移除 `PYTHONHOME`，让外部启动器使用自己的解释器。
+yt-dlp 是 Python 依赖，命令固定为当前 `sys.executable -m yt_dlp`，不查找 PATH 中的独立启动器。FFmpeg 由 `ffmpeg.find_ffmpeg()` 惰性解析：显式 `IMAGEIO_FFMPEG_EXE`（须通过版本检查）优先，否则由 imageio-ffmpeg 选择包内程序、Conda 或 PATH 回退。返回实际程序路径，同一任务共用于 yt-dlp 的 `--ffmpeg-location` 和项目音频处理；CLI / 交互批量任务只解析一次。
 
-预查询以可用 stdout 路径为准；非零退出码但有路径时告警。下载阶段以目标文件是否存在判断结果，非零退出码但文件存在时告警并继续后处理。这是当前约定，不代表仅凭退出码或文件存在能证明任意外部任务完整。
+两个 yt-dlp 调用都传 `--ignore-config`，下载设置由 bili-dl 自己管理。预查询必须同时给 yt-dlp 传 `--encoding utf-8`、给父进程设置 `encoding="utf-8"`；两端是同一个机器协议。下载阶段不强制改用户终端编码。两个调用继承环境副本，但移除 `PYTHONHOME`，让子进程按自己的 Python 环境解析标准库。
 
-音频修复通过 `ffmpeg -c:a copy -movflags +faststart` 无损重封装；直接音频下载与从视频提取音频都要覆盖。常用检查：
+预查询以单行可用 stdout 路径为准；多行（含重复路径）表示当前不支持的多个输出目标，在下载前失败，避免旧式分段 FLV 同名冲突。非零退出码但有单一路径时告警。下载阶段以目标文件是否存在判断结果，非零退出码但文件存在时告警并继续后处理。这是当前约定，不代表仅凭退出码或文件存在能证明任意外部任务完整。
+
+音频修复通过 `ffmpeg -c:a copy -movflags +faststart` 无损重封装；直接音频下载与从视频提取音频都要覆盖。运行时不依赖 ffprobe；如开发者另行安装了 ffprobe，可用以下命令辅助诊断：
 
 ```bash
 ffprobe -v error -show_entries format=format_name:format_tags=major_brand,compatible_brands path.m4a
 ```
 
 需要更细检查时查看 ffmpeg trace 中的 `moov` / `mdat` 顺序。不要把某次样本的精确 atom offset 写成通用不变量。
+
+项目捕获的 FFmpeg 诊断显式按 UTF-8 解码，并替换非法字节，避免 Windows CP936 环境下损坏媒体的 Unicode 路径导致诊断读取异常；这不改变终端编码或 yt-dlp 原生输出。
 
 SRT 固定 UTF-8 BOM + CRLF，原子替换；测试检查原始字节。媒体文件预测、终端编码与仓库行尾是三个边界，分别处理。
 
@@ -83,5 +87,7 @@ SRT 固定 UTF-8 BOM + CRLF，原子替换；测试检查原始字节。媒体�
 手工配置中的路径不会自动展开 `~` / 环境变量；交互输入会展开。`settings.export()` 只创建新文件，不能用重写 TOML 的方式丢失用户注释。
 
 测试入口按领域使用 `tests/test_media.py`、`test_terminal.py`、`test_interactive.py`、`test_cookiestore.py`、`test_transport.py` 等。网络协议由 mock 提供确定响应；真实终端、登录或下载的验证范围需单独说明。覆盖率按 CI 的源码 include 统计，不把含测试代码的总覆盖率当业务覆盖率。
+
+`tests/test_media_integration.py`（`pytest -m media`）使用内置 FFmpeg 生成有效 H.264 / AAC 样本，通过 loopback HTTP 交给真实 yt-dlp，清空 PATH 后验证 DASH 合并、视频、音频和无损容器修复。验证完整解码、轨道和音频 faststart；不请求 B 站或使用真实 Cookie。三系统 CI 的测试矩阵执行这些用例。
 
 README 保持展示与上手重点；详细行为在 `docs/usage.md`。菜单图从真实程序导出，使用不含账号或个人路径的画面。公开文档的图片与文档链接兼顾 GitHub / PyPI，发布前检查当前本地文件存在，并在构建后确认 sdist 包含 `docs/`。

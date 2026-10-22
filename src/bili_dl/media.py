@@ -22,9 +22,10 @@ for turning result messages into terminal output.
 
 from __future__ import annotations
 
+import importlib.util
 import os
-import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -33,8 +34,11 @@ from .config import FMT_AUDIO, FMT_AV
 from .models import DownloadConfig, DownloadResult
 
 
-def find_ytdlp() -> Optional[str]:
-    return shutil.which("yt-dlp")
+def find_ytdlp() -> Optional[tuple[str, ...]]:
+    """Return the dependency's command in this Python environment."""
+    if importlib.util.find_spec("yt_dlp") is None:
+        return None
+    return (sys.executable, "-m", "yt_dlp")
 
 
 def _template_for(mode: str, video_dir: Path, audio_dir: Path) -> str:
@@ -55,9 +59,21 @@ def _common_args(cfg: DownloadConfig) -> list[str]:
     re-read inherited proxy environment variables after the CLI resolved an
     explicit ``proxy = ""``.
     """
-    args: list[str] = ["--no-playlist", "--retries", "10", "--cookies", str(cfg.cookie_path)]
+    args: list[str] = [
+        "--ignore-config",
+        "--no-playlist",
+        "--retries",
+        "10",
+        "--cookies",
+        str(cfg.cookie_path),
+    ]
     args += ["--add-header", f"Referer:{cfg.referer}"]
     args += ["--proxy", cfg.proxy]
+    # Even an unavailable explicit override must reach yt-dlp; omitting it
+    # would let that child silently discover a different system binary.
+    ffmpeg_location = cfg.ffmpeg_bin or os.environ.get("IMAGEIO_FFMPEG_EXE")
+    if ffmpeg_location:
+        args += ["--ffmpeg-location", ffmpeg_location]
     if cfg.insecure:
         args.append("--no-check-certificate")
     return args
@@ -67,22 +83,21 @@ def download(url: str, cfg: DownloadConfig) -> DownloadResult:
     """Download one URL in the given mode; post-process as needed.
 
     Returns a :class:`DownloadResult`. ``cfg.ffmpeg_bin`` controls audio
-    extraction / container repair; if ``None`` (no ffmpeg on PATH) those
+    extraction / container repair; if ``None`` (no usable ffmpeg) those
     steps are skipped with a warning message.
     """
     ytdlp = cfg.ytdlp or find_ytdlp()
     if not ytdlp:
         return DownloadResult(
             success=False,
-            messages=[("error", "[错误] 未找到 yt-dlp，请先安装 (pip install -U yt-dlp)")],
+            messages=[("error", "[错误] bili-dl 的 yt-dlp 依赖缺失，请重新安装 bili-dl")],
         )
 
     common = _common_args(cfg)
     tmpl = _template_for(cfg.mode, cfg.video_dir, cfg.audio_dir)
     fmt = _format_for(cfg.mode)
     merge = [] if cfg.mode == "a" else ["--merge-output-format", "mp4"]
-    # uv may set PYTHONHOME for this project's interpreter. An external yt-dlp
-    # can belong to another Python installation and must resolve its own stdlib.
+    # The child uses this environment's Python and resolves its own stdlib.
     ytdlp_env = os.environ.copy()
     ytdlp_env.pop("PYTHONHOME", None)
 
@@ -91,7 +106,7 @@ def download(url: str, cfg: DownloadConfig) -> DownloadResult:
         cfg.stage("prepare", None)
     predict = subprocess.run(
         [
-            ytdlp,
+            *ytdlp,
             *common,
             "--encoding",
             "utf-8",
@@ -117,7 +132,15 @@ def download(url: str, cfg: DownloadConfig) -> DownloadResult:
             success=False,
             messages=[("error", f"[失败] 无法获取视频信息: {hint}")],
         )
-    out_path = Path(predict.stdout.strip())
+    paths = predict.stdout.strip().splitlines()
+    if len(paths) != 1:
+        return DownloadResult(
+            success=False,
+            messages=[
+                ("error", "[失败] 此链接包含多个输出目标；暂不支持旧式分段视频，请提供单个视频链接")
+            ],
+        )
+    out_path = Path(paths[0])
 
     # Phase 1 warnings (yt-dlp exit code is not a reliable failure
     # signal; the path is available, as in Phase 2's file-exists check).
@@ -136,7 +159,7 @@ def download(url: str, cfg: DownloadConfig) -> DownloadResult:
         if cfg.no_color:
             presentation += ["--color", "never"]
     result = subprocess.run(
-        [ytdlp, *common, *presentation, "-f", fmt, *merge, "-o", tmpl, url], env=ytdlp_env
+        [*ytdlp, *common, *presentation, "-f", fmt, *merge, "-o", tmpl, url], env=ytdlp_env
     )
 
     if not out_path.exists():

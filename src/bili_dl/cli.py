@@ -236,7 +236,7 @@ B 站视频、音频、字幕和评论下载工具。
         epilog=f"""\
 使用说明：
   首次下载前先 bili-dl login；也可在会话目录放入 Netscape Cookie .txt。
-  音视频需要 yt-dlp；合并、提取音频和容器修复使用 ffmpeg。
+  安装时自动提供 yt-dlp 和 ffmpeg；音视频保留 yt-dlp 原生进度。
   字幕、评论、登录和 --status 无需这两个工具。
   字幕仅取第一条已有轨道，不做语音识别；?p=N 选分 P，默认 P1。
 
@@ -600,14 +600,16 @@ def _status_command(opts: Options) -> int:
     return 0 if result.success else 1
 
 
-def _run_once(opts: Options, url: str, ytdlp: Optional[str], ffmpeg_bin: Optional[str]) -> bool:
+def _run_once(
+    opts: Options, url: str, ytdlp: Optional[tuple[str, ...]], ffmpeg_bin: Optional[str]
+) -> bool:
     result = actions.download_media(opts, url, ytdlp, ffmpeg_bin)
     _emit(result.messages)
     return result.success
 
 
 def _batch_download(
-    opts: Options, urls: list[str], ytdlp: Optional[str], ffmpeg_bin: Optional[str]
+    opts: Options, urls: list[str], ytdlp: Optional[tuple[str, ...]], ffmpeg_bin: Optional[str]
 ) -> int:
     """Download multiple URLs sequentially. Returns 0 if all succeed, 1 if any fail."""
     total = len(urls)
@@ -683,11 +685,12 @@ def _main_impl(argv: Optional[list[str]] = None) -> int:
     # Dependency checks (same severity ladder as bd.ps1) ---------------------
     ytdlp = downloader.find_ytdlp() if opts.mode != "s" else None
     if opts.mode != "s" and not ytdlp:
-        ui.error("[错误] 未找到 yt-dlp，请先安装 (pip install -U yt-dlp 或 winget install yt-dlp)")
+        ui.error("[错误] bili-dl 的 yt-dlp 依赖缺失，请重新安装 bili-dl")
         return 1
     ffmpeg_bin = ff.find_ffmpeg() if opts.mode != "s" else None
     if opts.mode != "s" and not ffmpeg_bin:
-        ui.warn("[警告] 未找到 ffmpeg，将跳过音频提取与容器修复")
+        ui.warn("[警告] ffmpeg 不可用，合并可能失败，将跳过音频提取与容器修复")
+        ui.info("请检查 IMAGEIO_FFMPEG_EXE；此平台无内置程序时，可安装系统 ffmpeg 并加入 PATH")
 
     try:
         ensure_dir(opts.cookie_dir or config_dir())
@@ -716,7 +719,7 @@ def _main_impl(argv: Optional[list[str]] = None) -> int:
             ui.warn("[警告] 批量文件中没有有效 URL")
             return 0
         if ytdlp:
-            ui.info(f"使用: {ytdlp}")
+            ui.info("下载引擎: yt-dlp（随 bili-dl 安装）")
         ui.info(f"模式: {ui.mode_label(opts.mode)} | 批量文件: {args.batch_file}")
         print(file=sys.stderr)
         return _batch_download(opts, urls, ytdlp, ffmpeg_bin)
@@ -724,7 +727,7 @@ def _main_impl(argv: Optional[list[str]] = None) -> int:
     # Non-interactive mode: one URL then exit --------------------------------
     if args.url:
         if ytdlp:
-            ui.info(f"使用: {ytdlp}")
+            ui.info("下载引擎: yt-dlp（随 bili-dl 安装）")
         ui.info(f"模式: {ui.mode_label(opts.mode)} | URL: {args.url}")
         print(file=sys.stderr)
         ok = _run_once(opts, args.url, ytdlp, ffmpeg_bin)

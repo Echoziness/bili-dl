@@ -147,11 +147,12 @@ def test_status_flag() -> None:
 
 def test_main_no_ytdlp(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(downloader, "find_ytdlp", lambda: None)
-    assert cli.main([]) == 1
+    monkeypatch.setattr(cli, "_prepare_cookie", lambda opts: pytest.fail("No login needed"))
+    assert cli.main(["https://www.bilibili.com/video/BV1"]) == 1
 
 
 def test_main_no_ffmpeg_warns(monkeypatch: pytest.MonkeyPatch, capsys: pytest.Capture) -> None:
-    monkeypatch.setattr(downloader, "find_ytdlp", lambda: "yt-dlp")
+    monkeypatch.setattr(downloader, "find_ytdlp", lambda: ("python", "-m", "yt_dlp"))
     monkeypatch.setattr(ff, "find_ffmpeg", lambda: None)
     monkeypatch.setattr(cli, "_prepare_cookie", lambda opts: False)
     assert cli.main(["https://bilibili.com/video/BV1"]) == 1
@@ -159,7 +160,7 @@ def test_main_no_ffmpeg_warns(monkeypatch: pytest.MonkeyPatch, capsys: pytest.Ca
 
 
 def test_main_non_interactive_success(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(downloader, "find_ytdlp", lambda: "yt-dlp")
+    monkeypatch.setattr(downloader, "find_ytdlp", lambda: ("python", "-m", "yt_dlp"))
     monkeypatch.setattr(ff, "find_ffmpeg", lambda: "ffmpeg")
     monkeypatch.setattr(cli, "_prepare_cookie", lambda opts: True)
     monkeypatch.setattr(cli, "_run_once", lambda opts, url, ytdlp, ffmpeg_bin: True)
@@ -338,7 +339,7 @@ def test_status_reports_pending_confirmation_without_retrying_it(
 
 
 def test_main_non_interactive_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(downloader, "find_ytdlp", lambda: "yt-dlp")
+    monkeypatch.setattr(downloader, "find_ytdlp", lambda: ("python", "-m", "yt_dlp"))
     monkeypatch.setattr(ff, "find_ffmpeg", lambda: "ffmpeg")
     monkeypatch.setattr(cli, "_prepare_cookie", lambda opts: True)
     monkeypatch.setattr(cli, "_run_once", lambda opts, url, ytdlp, ffmpeg_bin: False)
@@ -347,7 +348,7 @@ def test_main_non_interactive_failure(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_main_repl_eof_exits_cleanly(monkeypatch: pytest.MonkeyPatch) -> None:
     """REPL should exit 0 on EOF (stdin closed / redirected)."""
-    monkeypatch.setattr(downloader, "find_ytdlp", lambda: "yt-dlp")
+    monkeypatch.setattr(downloader, "find_ytdlp", lambda: ("python", "-m", "yt_dlp"))
     monkeypatch.setattr(ff, "find_ffmpeg", lambda: "ffmpeg")
     monkeypatch.setattr(cli, "_prepare_cookie", lambda opts: True)
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
@@ -409,7 +410,7 @@ def test_main_loads_config_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
     config_file = tmp_path / "config.toml"
     config_file.write_text('mode = "a"\nproxy = "http://cfg:7890"\n', encoding="utf-8")
 
-    monkeypatch.setattr(downloader, "find_ytdlp", lambda: "yt-dlp")
+    monkeypatch.setattr(downloader, "find_ytdlp", lambda: ("python", "-m", "yt_dlp"))
     monkeypatch.setattr(ff, "find_ffmpeg", lambda: "ffmpeg")
     monkeypatch.setattr(cli, "_prepare_cookie", lambda opts: True)
     captured_opts: list[cli.Options] = []
@@ -452,7 +453,7 @@ def test_read_batch_urls_empty(tmp_path: Path) -> None:
 
 
 def test_main_batch_file_not_exists(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(downloader, "find_ytdlp", lambda: "yt-dlp")
+    monkeypatch.setattr(downloader, "find_ytdlp", lambda: ("python", "-m", "yt_dlp"))
     monkeypatch.setattr(ff, "find_ffmpeg", lambda: "ffmpeg")
     monkeypatch.setattr(cli, "_prepare_cookie", lambda opts: True)
     assert cli.main(["--batch-file", "/nonexistent/urls.txt"]) == 1
@@ -465,7 +466,7 @@ def test_main_batch_download(
     batch_file.write_text(
         "https://bilibili.com/video/BV1\nhttps://bilibili.com/video/BV2\n", encoding="utf-8"
     )
-    monkeypatch.setattr(downloader, "find_ytdlp", lambda: "yt-dlp")
+    monkeypatch.setattr(downloader, "find_ytdlp", lambda: ("python", "-m", "yt_dlp"))
     monkeypatch.setattr(ff, "find_ffmpeg", lambda: "ffmpeg")
     monkeypatch.setattr(cli, "_prepare_cookie", lambda opts: True)
     monkeypatch.setattr(cli, "_run_once", lambda opts, url, ytdlp, ffmpeg_bin: True)
@@ -483,7 +484,7 @@ def test_main_batch_partial_failure(
     batch_file.write_text(
         "https://bilibili.com/video/BV1\nhttps://bilibili.com/video/BV2\n", encoding="utf-8"
     )
-    monkeypatch.setattr(downloader, "find_ytdlp", lambda: "yt-dlp")
+    monkeypatch.setattr(downloader, "find_ytdlp", lambda: ("python", "-m", "yt_dlp"))
     monkeypatch.setattr(ff, "find_ffmpeg", lambda: "ffmpeg")
     monkeypatch.setattr(cli, "_prepare_cookie", lambda opts: True)
 
@@ -504,7 +505,7 @@ def test_main_batch_partial_failure(
 def test_main_batch_empty_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     batch_file = tmp_path / "urls.txt"
     batch_file.write_text("# only comments\n", encoding="utf-8")
-    monkeypatch.setattr(downloader, "find_ytdlp", lambda: "yt-dlp")
+    monkeypatch.setattr(downloader, "find_ytdlp", lambda: ("python", "-m", "yt_dlp"))
     monkeypatch.setattr(ff, "find_ffmpeg", lambda: "ffmpeg")
     monkeypatch.setattr(cli, "_prepare_cookie", lambda opts: True)
     assert cli.main(["--batch-file", str(batch_file)]) == 0
@@ -515,7 +516,7 @@ def test_main_batch_empty_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
 
 def test_main_non_tty_no_url_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     """Non-interactive stdin + no URL → error, not REPL (clig.dev §Interactivity)."""
-    monkeypatch.setattr(downloader, "find_ytdlp", lambda: "yt-dlp")
+    monkeypatch.setattr(downloader, "find_ytdlp", lambda: ("python", "-m", "yt_dlp"))
     monkeypatch.setattr(ff, "find_ffmpeg", lambda: "ffmpeg")
     monkeypatch.setattr(cli, "_prepare_cookie", lambda opts: True)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
@@ -524,7 +525,7 @@ def test_main_non_tty_no_url_errors(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_main_tty_no_url_enters_repl(monkeypatch: pytest.MonkeyPatch) -> None:
     """Interactive stdin (TTY) + no URL → REPL."""
-    monkeypatch.setattr(downloader, "find_ytdlp", lambda: "yt-dlp")
+    monkeypatch.setattr(downloader, "find_ytdlp", lambda: ("python", "-m", "yt_dlp"))
     monkeypatch.setattr(ff, "find_ffmpeg", lambda: "ffmpeg")
     monkeypatch.setattr(cli, "_prepare_cookie", lambda opts: True)
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
@@ -564,7 +565,7 @@ def test_merge_proxy_config_overrides_env(monkeypatch: pytest.MonkeyPatch) -> No
 
 def test_main_no_color_flag(monkeypatch: pytest.MonkeyPatch) -> None:
     """--no-color calls ui.disable_color()."""
-    monkeypatch.setattr(downloader, "find_ytdlp", lambda: "yt-dlp")
+    monkeypatch.setattr(downloader, "find_ytdlp", lambda: ("python", "-m", "yt_dlp"))
     monkeypatch.setattr(ff, "find_ffmpeg", lambda: "ffmpeg")
     monkeypatch.setattr(cli, "_prepare_cookie", lambda opts: True)
     called = [False]
@@ -589,7 +590,7 @@ def test_main_no_ffmpeg_warns_to_stderr(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.Capture
 ) -> None:
     """Warning messages go to stderr, not stdout (clig.dev: messaging to stderr)."""
-    monkeypatch.setattr(downloader, "find_ytdlp", lambda: "yt-dlp")
+    monkeypatch.setattr(downloader, "find_ytdlp", lambda: ("python", "-m", "yt_dlp"))
     monkeypatch.setattr(ff, "find_ffmpeg", lambda: None)
     monkeypatch.setattr(cli, "_prepare_cookie", lambda opts: False)
     cli.main(["https://bilibili.com/video/BV1"])
@@ -660,7 +661,7 @@ def test_run_once_invokes_download(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(downloader, "download", fake_download)
     monkeypatch.setattr("bili_dl.cookiestore.bili_cookie_path", lambda cd: Path("/c"))
-    assert cli._run_once(cli.Options(), "https://x", "yt-dlp", "ffmpeg") is True
+    assert cli._run_once(cli.Options(), "https://x", ("python", "-m", "yt_dlp"), "ffmpeg") is True
     assert captured == ["https://x"]
 
 
@@ -674,7 +675,7 @@ def test_subtitle_mode_is_mutually_exclusive(media_flag: str) -> None:
 
 
 def test_main_ensure_dir_fails(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(downloader, "find_ytdlp", lambda: "yt-dlp")
+    monkeypatch.setattr(downloader, "find_ytdlp", lambda: ("python", "-m", "yt_dlp"))
     monkeypatch.setattr(ff, "find_ffmpeg", lambda: "ffmpeg")
 
     def bad_mkdir(self: Path, *a: object, **kw: object) -> None:

@@ -18,7 +18,7 @@ B 站视频、音频、字幕与评论下载工具。支持 Windows、macOS、Li
 | 内容 | 保存结果 | 特点 |
 | --- | --- | --- |
 | 视频 | 带声音的视频 | 按账号权限获取可用画质；可额外提取独立音频 |
-| 音频 | 优先 M4A | 有 ffmpeg 时无损整理容器，改善 foobar2000 等播放器的起播体验 |
+| 音频 | 优先 M4A | 无损整理容器，改善 foobar2000 等播放器的起播体验 |
 | 字幕 | 带时间戳的 SRT | 直接获取已有字幕，无需下载视频 |
 | 主评论 / 楼中楼 | UTF-8 JSON | 主评论可排序；支持数量上限与精简 / 原始字段 |
 
@@ -37,21 +37,9 @@ bili-dl -V
 
 没有 pipx 时，可在自己的 Python 虚拟环境中运行 `python -m pip install bili-dl`。
 
-**下载音视频**还需要 PATH 中的 yt-dlp；ffmpeg 用于合并、提取独立音频和无损容器修复：
+**yt-dlp 和 FFmpeg 随依赖自动安装**，常见 Windows、macOS、Linux 平台无需另行下载或配置 PATH。FFmpeg 由 imageio-ffmpeg 的平台安装包提供，安装完成后运行时无需再下载工具。
 
-```bash
-pipx install yt-dlp
-```
-
-如果使用 Python 虚拟环境，改用 `python -m pip install -U yt-dlp`。
-
-| 系统 | 安装 ffmpeg |
-| --- | --- |
-| Windows | `winget install ffmpeg` |
-| macOS | `brew install ffmpeg` |
-| Debian / Ubuntu | `sudo apt install ffmpeg` |
-
-字幕、评论、扫码登录和账号状态查询仅需安装 bili-dl。
+macOS 支持 Intel / Apple Silicon，Linux 支持 glibc 2.17+ 的 x86-64 / ARM64，Windows 提供 x86-64 / x86 包。Windows 原生 ARM64、Alpine 等未提供对应内置程序的平台可使用系统 FFmpeg；详见[安装与升级](https://github.com/Echoziness/bili-dl/blob/main/docs/usage.md#安装与升级)。
 
 ## 快速上手
 
@@ -117,6 +105,7 @@ Linux 未设置 `XDG_DOWNLOAD_DIR` 时使用 `~/Downloads`。用 `--output-dir D
 ## 使用前了解
 
 - **画质受账号权限和 B 站接口限制**；媒体模式按单个视频处理，不自动遍历合集、收藏夹或全部分 P。
+- 旧式分段 FLV 暂不支持。媒体参数由 bili-dl 管理，不读取独立 yt-dlp 的配置文件。
 - **字幕只取接口返回的第一条已有轨道**，支持 `?p=N` 指定分 P；不进行语音识别。
 - **评论是当前账号可见的实时快照**，数量可能变化；楼中楼上限包含主评论本身，暂不支持续传。
 - **扫码会话可能失效**，失效后需重新登录。导入 Cookie 时仅提取 B 站条目；扫码登录不访问浏览器资料，无遥测。
@@ -128,4 +117,4 @@ Linux 未设置 `XDG_DOWNLOAD_DIR` 时使用 `~/Downloads`。用 `--output-dir D
 
 开发维护：[开发说明](https://github.com/Echoziness/bili-dl/blob/main/docs/development.md) · [排障记录](https://github.com/Echoziness/bili-dl/blob/main/docs/troubleshooting.md)
 
-本项目使用 [MIT](https://github.com/Echoziness/bili-dl/blob/main/LICENSE) 许可证。yt-dlp 与 ffmpeg 需单独安装，使用各自的许可证。
+本项目使用 [MIT](https://github.com/Echoziness/bili-dl/blob/main/LICENSE) 许可证。依赖及 FFmpeg 可执行程序使用各自的许可证，见[第三方组件说明](https://github.com/Echoziness/bili-dl/blob/main/docs/third-party.md)。

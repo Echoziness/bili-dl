@@ -38,7 +38,10 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - run: pip install -e . pytest
-      - run: pytest
+      - name: Unit tests
+        run: pytest --strict-markers -m "not media"
+      - name: Bundled FFmpeg and yt-dlp integration
+        run: pytest --strict-markers -m media
 
   coverage:
     runs-on: ubuntu-latest

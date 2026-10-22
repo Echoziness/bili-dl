@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-10-22
+
+### Changed
+
+- Install yt-dlp and platform-provided FFmpeg with bili-dl's Python dependencies.
+  Media tasks invoke yt-dlp in the same Python environment and explicitly share
+  one FFmpeg executable for merging, audio extraction and container repair.
+- Honor `IMAGEIO_FFMPEG_EXE` before bundled FFmpeg, with Conda / system fallback
+  on other platforms. Invalid explicit overrides are reported as unavailable.
+- Isolate media tasks from standalone yt-dlp configuration, and reject multiple
+  predicted output paths before downloading unsupported legacy split videos.
+- Simplify installation help and documentation, document platform coverage and
+  third-party licenses, and validate real media processing in the three-OS CI matrix.
+
+### Fixed
+
+- Decode captured FFmpeg diagnostics as UTF-8 with replacement for malformed bytes,
+  preventing Windows locale decoding errors from hiding failures on Unicode paths.
+
 ## [0.5.0] - 2026-10-20
 
 ### Added
@@ -718,7 +737,8 @@ the system *larger* without making it *simpler*.
 - `--version` is now exposed as `-V` (capital), since `-v` is taken by
   `--video`. Matches yt-dlp / curl / pip convention.
 
-[Unreleased]: https://github.com/Echoziness/bili-dl/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/Echoziness/bili-dl/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/Echoziness/bili-dl/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/Echoziness/bili-dl/compare/v0.4.9...v0.5.0
 [0.4.9]: https://github.com/Echoziness/bili-dl/compare/v0.4.8...v0.4.9
 [0.4.8]: https://github.com/Echoziness/bili-dl/compare/v0.4.7...v0.4.8

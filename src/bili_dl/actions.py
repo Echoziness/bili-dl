@@ -50,7 +50,7 @@ def read_batch_urls(path: Path) -> list[str]:
 def download_media(
     opts: Options,
     url: str,
-    ytdlp: Optional[str] = None,
+    ytdlp: Optional[tuple[str, ...]] = None,
     ffmpeg_bin: Optional[str] = None,
     *,
     stage: Optional[Callable[[str, Optional[Path]], None]] = None,

@@ -1,4 +1,4 @@
-"""ffmpeg / ffprobe discovery and zero-loss audio (re)mux operations.
+"""Bundled ffmpeg discovery and zero-loss audio (re)mux operations.
 
 Two operations, both with ``-c:a copy`` (no re-encode, no quality loss):
 
@@ -57,7 +57,36 @@ class ExtractResult:
 
 
 def find_ffmpeg() -> Optional[str]:
-    return shutil.which("ffmpeg")
+    """Resolve an explicit override, bundled ffmpeg, then supported fallbacks.
+
+    imageio-ffmpeg validates its bundled / Conda / PATH candidates. Its explicit
+    environment override is unchecked, so validate that separately and never
+    silently replace an invalid user choice with another binary.
+    """
+    override = os.environ.get("IMAGEIO_FFMPEG_EXE")
+    if override:
+        executable = shutil.which(override)
+        if not executable:
+            return None
+        try:
+            result = subprocess.run(
+                [executable, "-version"],
+                capture_output=True,
+                timeout=5,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return executable if result.returncode == 0 else None
+
+    from imageio_ffmpeg import get_ffmpeg_exe
+
+    try:
+        candidate: str = get_ffmpeg_exe()
+    except RuntimeError:
+        return None
+    # The package's final fallback may be a bare command. yt-dlp requires an
+    # existing path for --ffmpeg-location, so resolve it here as well.
+    return shutil.which(candidate)
 
 
 def _run(args: list[str]) -> tuple[int, str]:
@@ -67,7 +96,9 @@ def _run(args: list[str]) -> tuple[int, str]:
     included in the result message — the user sees *why* ffmpeg failed,
     not just *that* it failed.
     """
-    result = subprocess.run(args, capture_output=True, text=True)
+    result = subprocess.run(
+        args, capture_output=True, text=True, encoding="utf-8", errors="replace"
+    )
     return result.returncode, result.stderr.strip()
 
 

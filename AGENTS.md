@@ -22,9 +22,10 @@
 
 ### 媒体与文件
 
+- yt-dlp 使用当前 Python 的 `-m yt_dlp`，不依赖全局命令。FFmpeg 显式覆盖优先，其次由 imageio-ffmpeg 解析包内 / Conda / PATH 程序；同一任务的合并、提取、修复必须使用同一路径，两次 yt-dlp 都传 `--ffmpeg-location` 和 `--ignore-config`。仅执行媒体任务时解析工具。
 - 保留 yt-dlp 两阶段流程：预查询输出路径，再下载。预查询两端显式约定 UTF-8；下载阶段继承终端，不改变用户 stdio 编码，不全局设置 `PYTHONUTF8`。两个子进程都移除继承的 `PYTHONHOME`。
 - 下载前停止界面刷新，将终端交给 yt-dlp 原生进度；`DownloadConfig.stage` 只报告阶段。失败或警告时保留原生诊断到用户离开结果页。
-- 预查询有可用路径、下载后目标文件存在时，非零退出码作为警告，不单独判失败。结果文件通过 `output_path` / `additional_paths` 返回。
+- 预查询只接受单行路径；多目标（含同名重复行）在下载前报错，暂不支持旧式分段 FLV。单一路径可用、下载后目标文件存在时，非零退出码作为警告，不单独判失败。结果文件通过 `output_path` / `additional_paths` 返回。
 - `all` 模式提取音频和 `a` 模式直接下载音频都须在 ffmpeg 可用时走无损容器修复；`extract_audio()` 提取后调用 `repair_audio_container()`。
 - 字幕只取 API 首条轨道，不回退、不做 ASR。SRT 固定 UTF-8 BOM + CRLF；验证字节，避免 `read_text()` 的换行归一化掩盖问题。短链和字幕 CDN 请求不携带登录 Cookie。
 - 评论必须保留去重、上限、归属校验与完整性语义。热门请求不重放含糊失败；计数不作为完成百分比。精简投影在协议校验之后，`--full` 也去掉内嵌回复预览；失败和中断不覆盖旧文件。
@@ -54,7 +55,7 @@ uv run pytest
 
 - 网络确有需要时可给 `uv sync` 指定镜像；不把某次网络故障当作默认关闭 TLS 的理由。
 - 依赖变更同步 `pyproject.toml` 与 `uv.lock`；仅改构建元数据时检查锁是否仍有效，不强行改写。开发依赖放 dev 组。
-- 测试验证可观察行为、数据与副作用；网络协议使用 mock，终端交互按需用真实伪终端验证。修改 Cookie / 会话 / ffmpeg 必须跑对应测试。
+- 测试验证可观察行为、数据与副作用；网络协议使用 mock，终端交互按需用真实伪终端验证。修改 Cookie / 会话 / ffmpeg 必须跑对应测试；媒体集成用例通过本机 HTTP 验证真实 yt-dlp 和包内 FFmpeg，`uv run pytest -m media`。
 - CI 覆盖率只统计业务源码，命令为 `uv run coverage run -m pytest -q`、`uv run coverage report --include="src/bili_dl/*" --fail-under=70`；平台和 Python 矩阵以 `.github/workflows/ci.yml` 为准，不在此维护易过时的数量。
 - Python 文件遵循 `.gitattributes` 的 LF 约定。项目临时工具与检查记录放 `tmp/`，独立预览及实测产物放 `output/`，二者均不进入发布包。
 
