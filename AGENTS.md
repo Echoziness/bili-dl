@@ -26,7 +26,8 @@
 - 保留 yt-dlp 两阶段流程：预查询输出路径，再下载。预查询两端显式约定 UTF-8；下载阶段继承终端，不改变用户 stdio 编码，不全局设置 `PYTHONUTF8`。两个子进程都移除继承的 `PYTHONHOME`。
 - 下载前停止界面刷新，将终端交给 yt-dlp 原生进度；`DownloadConfig.stage` 只报告阶段。失败或警告时保留原生诊断到用户离开结果页。
 - 预查询只接受单行路径；多目标（含同名重复行）在下载前报错，暂不支持旧式分段 FLV。单一路径可用、下载后目标文件存在时，非零退出码作为警告，不单独判失败。结果文件通过 `output_path` / `additional_paths` 返回。
-- `all` 模式提取音频和 `a` 模式直接下载音频都须在 ffmpeg 可用时走无损容器修复；`extract_audio()` 提取后调用 `repair_audio_container()`。
+- `all` 模式提取音频和 `a` 模式直接下载音频都须在 ffmpeg 可用时走无损容器修复；`extract_audio()` 提取后调用 `repair_audio_container()`。两步显式 `-f mp4`，避免 `.m4a` 选择不支持 FLAC / E-AC-3 的 iPod 封装器。仅对 ISO BMFF 的 `fLaC` sample entry 禁用编辑列表，保留零时长尾包；AAC 仍须保留编码延迟处理。
+- 含 FLAC 的合并视频在返回或提取音频前由 FFmpeg 无损整理，读取被编辑列表隐藏的尾包，并用负 CTS 偏移保留 B 帧呈现时间线。普通 AAC 视频不执行此整理；失败保留视频，不继续提取不完整音轨。
 - 字幕只取 API 首条轨道，不回退、不做 ASR。SRT 固定 UTF-8 BOM + CRLF；验证字节，避免 `read_text()` 的换行归一化掩盖问题。短链和字幕 CDN 请求不携带登录 Cookie。
 - 评论必须保留去重、上限、归属校验与完整性语义。热门请求不重放含糊失败；计数不作为完成百分比。精简投影在协议校验之后，`--full` 也去掉内嵌回复预览；失败和中断不覆盖旧文件。
 

@@ -29,9 +29,11 @@ from __future__ import annotations
 import contextlib
 import os
 import shutil
+import struct
 import subprocess
 import sys
 import uuid
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -111,6 +113,55 @@ def _stderr_detail(stderr: str) -> str:
     if lines:
         return f": {lines[-1]}"
     return ""
+
+
+def _audio_muxer_args(source: Path) -> list[str]:
+    """Use MP4, retaining FLAC tail packets without changing AAC priming edits.
+
+    Some Bilibili fragmented FLAC tracks report zero packet durations. An MP4
+    edit list can then hide the final audio packet. FLAC needs no encoder-delay
+    edit; AAC does, so inspect the structured sample entry rather than disabling
+    edits globally or parsing FFmpeg diagnostics. No ffprobe is required.
+    """
+    args = ["-f", "mp4"]
+    try:
+        with source.open("rb") as stream:
+
+            def boxes(start: int, end: int) -> Iterator[tuple[bytes, int, int]]:
+                while start + 8 <= end:
+                    stream.seek(start)
+                    header = stream.read(8)
+                    if len(header) != 8:
+                        return
+                    size, kind = struct.unpack(">I4s", header)
+                    header_size = 8
+                    if size == 1:
+                        large = stream.read(8)
+                        if len(large) != 8:
+                            return
+                        size = struct.unpack(">Q", large)[0]
+                        header_size = 16
+                    elif size == 0:
+                        size = end - start
+                    if size < header_size or start + size > end:
+                        return
+                    yield kind, start + header_size, start + size
+                    start += size
+
+            pending = [(0, source.stat().st_size)]
+            while pending:
+                for kind, payload, end in boxes(*pending.pop()):
+                    if kind in {b"moov", b"trak", b"mdia", b"minf", b"stbl"}:
+                        pending.append((payload, end))
+                    elif kind == b"stsd":
+                        # FullBox flags/version and sample-entry count.
+                        if any(tag == b"fLaC" for tag, _, _ in boxes(payload + 8, end)):
+                            return [*args, "-use_editlist", "0"]
+    except OSError:
+        # Let FFmpeg report unreadable/non-ISO-BMFF inputs through its usual
+        # failure path; the original-file preservation contract still applies.
+        pass
+    return args
 
 
 def _cfa_enabled() -> bool:
@@ -195,6 +246,9 @@ def repair_audio_container(audio_path: Path, ffmpeg: str) -> RepairResult:
             "0",
             "-movflags",
             "+faststart",
+            # .m4a otherwise selects the restricted iPod muxer, which rejects
+            # Bilibili's Hi-Res FLAC tracks. Keep the codec and use ISO BMFF.
+            *_audio_muxer_args(audio_path),
             str(temp_path),
         ]
     )
@@ -266,6 +320,7 @@ def extract_audio(video_path: Path, audio_dir: Path, ffmpeg: str) -> ExtractResu
             "copy",
             "-map_metadata",
             "0",
+            *_audio_muxer_args(video_path),
             str(audio_path),
         ]
     )
@@ -288,4 +343,56 @@ def extract_audio(video_path: Path, audio_dir: Path, ffmpeg: str) -> ExtractResu
         success=True,
         messages=[("info", f"[提取音频] {video_path.stem}"), *repair.messages],
         audio_path=audio_path,
+    )
+
+
+def repair_flac_video_container(video_path: Path, ffmpeg: str) -> RepairResult:
+    """Expose FLAC tail packets hidden by a merger's MP4 edit list.
+
+    Let FFmpeg rebuild the container and preserve both streams. Negative CTS
+    offsets retain B-frame presentation without requiring video edit lists.
+    Ordinary AAC videos keep their existing edit/encoder-delay handling.
+    """
+    muxer_args = _audio_muxer_args(video_path)
+    if "-use_editlist" not in muxer_args:
+        return RepairResult(success=True)
+    temporary = video_path.with_name(f"_temp_{video_path.stem}_{uuid.uuid4().hex[:8]}.mp4")
+    try:
+        rc, stderr = _run(
+            [
+                ffmpeg,
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-ignore_editlist",
+                "1",
+                "-i",
+                str(video_path),
+                "-map",
+                "0",
+                "-c",
+                "copy",
+                "-map_metadata",
+                "0",
+                "-movflags",
+                "+faststart+negative_cts_offsets",
+                *muxer_args,
+                str(temporary),
+            ]
+        )
+        if rc == 0 and temporary.exists():
+            if temporary.stat().st_size > video_path.stat().st_size * REPAIR_MIN_SIZE_RATIO:
+                temporary.replace(video_path)
+                return RepairResult(
+                    success=True, messages=[("ok", "[完成!] 视频内 FLAC 音轨容器已整理")]
+                )
+        detail = _stderr_detail(stderr)
+    except OSError as error:
+        detail = f": {error}"
+    finally:
+        with contextlib.suppress(OSError):
+            temporary.unlink(missing_ok=True)
+    return RepairResult(
+        success=False, messages=[("error", f"[失败] 视频音轨容器整理失败{detail}，保留原文件")]
     )

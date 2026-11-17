@@ -255,6 +255,10 @@ bili-dl -s --batch-file urls.txt --output-dir ./subtitles
 
 ## 常见问题
 
+### Hi-Res / 杜比与音频编码
+
+音频模式自动选择账号当前可获取的最佳 M4A 音轨，没有手动指定 Dolby / Hi-Res 的选项。`.m4a` 是容器扩展名，内容可能是 AAC、FLAC 或 E-AC-3，不能只根据文件名或视频标题判断实际编码。整理与提取保持原编码，不重编码或自动降级为普通 AAC；播放高规格音频还需播放器支持对应编码。
+
 ### Windows 下载成功，提取音频却失败
 
 如果开启 Windows Defender“受控文件夹访问”，未获允许的 ffmpeg 可能无法写入视频或音乐库，错误可能表现为 `No such file or directory` 或 `Bad file descriptor`。

@@ -4,6 +4,15 @@
 
 [开发说明](development.md) · [面向使用者的常见问题](usage.md#常见问题)
 
+## Hi-Res 音频下载成功但容器整理失败
+
+- **范围与现象**：2026-11-17，bili-dl 0.5.1、包内 FFmpeg 7.1，BV1Rc1gBaERq 下载的 M4A 实际为 48 kHz / 24-bit / 双声道 FLAC。整理时提示 `Could not write header ... Invalid argument`，原文件仍保留。
+- **已确认原因**：提取和整理都只根据 `.m4a` 推断输出格式，FFmpeg 自动选择 iPod 封装器；其编码表不支持 FLAC / E-AC-3。改为显式 MP4 封装、仍用 `-c:a copy`，同一文件即可成功。
+- **修复与验证**：两条路径均传 `-f mp4`。真实媒体集成验证 FLAC / ALAC 的 96 kHz、24-bit 以及 E-AC-3 的 48 kHz、5.1 声道，比较压缩音频包和解码 PCM 的 SHA-256，并检查 faststart。E-AC-3 合成样本不等于真实 Atmos/JOC 轨道实测。
+- **真实文件的额外边界**：同一 FLAC 输入含 2689 包且包时长为零；只改 MP4 封装时，自动编辑列表会隐藏末尾 18 字节的 FLAC 包，导致包与 PCM 哈希不同。检查 ISO BMFF 的 `fLaC` sample entry 后，仅为 FLAC 禁用编辑列表，真实文件两项哈希均保持一致。全局禁用编辑列表会破坏 AAC 的编码延迟处理，另有真实 AAC 回归保护。
+- **视频合并路径**：同日真实 `--all` 下载得到 3840×2160 / 60 fps / HEVC Main 10 视频，合并也隐藏同一个 FLAC 尾包，提取后两份音频虽彼此一致却都不同于原轨。含 FLAC 的视频须先用 FFmpeg 忽略输入编辑列表、无损重封装并启用负 CTS 偏移。真实视频的 15488 个包和 PTS 一致；合成回归同时覆盖 `v` / `all` 和原轨哈希，不能只检查文件存在或两份输出一致。
+- **使用边界**：当前音频模式自动选取可用最佳 M4A 音轨，没有手动选择 Dolby / Hi-Res 的选项；标题含“杜比”不代表下载结果一定是杜比音轨。
+
 ## FFmpeg 失败时 Unicode 路径触发解码异常
 
 - **范围与现象**：2026-10-22，Windows CP936、Python 3.11.16、imageio-ffmpeg 0.6.0 的 FFmpeg 7.1；修复名含中文 / emoji 的损坏 M4A 时，原文件保留，但诊断读取线程抛出 `UnicodeDecodeError`，后续访问 stderr 又触发异常。

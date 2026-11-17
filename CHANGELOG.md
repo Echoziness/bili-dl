@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-11-17
+
+### Fixed
+
+- Explicitly use the MP4 muxer for lossless M4A audio extraction and container
+  repair, allowing Hi-Res FLAC tracks instead of rejecting them with the
+  extension-selected iPod muxer. Audio codecs and sample data are preserved.
+- Preserve the final packet of fragmented FLAC tracks with missing durations
+  by disabling FLAC edit lists, while retaining AAC encoder-delay handling.
+- Restore FLAC tail packets hidden by yt-dlp's MP4 merger before returning
+  videos or extracting audio; preserve video packets and presentation timing.
+
 ## [0.5.1] - 2026-10-22
 
 ### Changed
@@ -737,7 +749,8 @@ the system *larger* without making it *simpler*.
 - `--version` is now exposed as `-V` (capital), since `-v` is taken by
   `--video`. Matches yt-dlp / curl / pip convention.
 
-[Unreleased]: https://github.com/Echoziness/bili-dl/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/Echoziness/bili-dl/compare/v0.5.2...HEAD
+[0.5.2]: https://github.com/Echoziness/bili-dl/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/Echoziness/bili-dl/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/Echoziness/bili-dl/compare/v0.4.9...v0.5.0
 [0.4.9]: https://github.com/Echoziness/bili-dl/compare/v0.4.8...v0.4.9

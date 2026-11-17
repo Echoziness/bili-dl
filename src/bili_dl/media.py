@@ -190,6 +190,11 @@ def download(url: str, cfg: DownloadConfig) -> DownloadResult:
         video_msgs.append(
             ("warn", f"[警告] yt-dlp 退出码 {result.returncode}（非零，但文件已生成）")
         )
+    if cfg.ffmpeg_bin:
+        repaired_video = ff.repair_flac_video_container(out_path, cfg.ffmpeg_bin)
+        video_msgs.extend(repaired_video.messages)
+        if not repaired_video.success:
+            return DownloadResult(success=True, messages=video_msgs, output_path=out_path)
     additional: list[Path] = []
     if cfg.mode == "all" and cfg.ffmpeg_bin:
         if cfg.stage:

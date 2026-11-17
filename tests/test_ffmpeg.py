@@ -83,6 +83,33 @@ def _completed(args: list[str], rc: int, stderr: str = "") -> subprocess.Complet
 # ─── repair_audio_container ─────────────────────────────────────────────────
 
 
+@pytest.mark.parametrize("failure", ["ffmpeg", "tiny-output", "replace"])
+def test_flac_video_repair_failure_keeps_original(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    video = tmp_path / "original.mp4"
+    original = b"original media" * 100
+    video.write_bytes(original)
+    monkeypatch.setattr(ff, "_audio_muxer_args", lambda path: ["-f", "mp4", "-use_editlist", "0"])
+
+    def run(args: list[str]) -> tuple[int, str]:
+        if failure == "ffmpeg":
+            return 1, "muxing failed"
+        Path(args[-1]).write_bytes(b"x" if failure == "tiny-output" else original)
+        return 0, ""
+
+    def locked(self: Path, target: Path) -> Path:
+        raise PermissionError("file locked")
+
+    monkeypatch.setattr(ff, "_run", run)
+    if failure == "replace":
+        monkeypatch.setattr(Path, "replace", locked)
+    result = ff.repair_flac_video_container(video, "ffmpeg")
+    assert not result.success
+    assert video.read_bytes() == original
+    assert not list(tmp_path.glob("_temp_*.mp4"))
+
+
 def test_repair_file_not_exists(tmp_path: Path) -> None:
     result = ff.repair_audio_container(tmp_path / "nope.m4a", "ffmpeg")
     assert result.success is False

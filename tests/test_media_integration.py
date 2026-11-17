@@ -38,7 +38,8 @@ def _run_ffmpeg(
     return subprocess.run(
         [executable, "-y", "-hide_banner", "-loglevel", "error", *args],
         capture_output=True,
-        text=True,
+        encoding="utf-8",
+        errors="replace",
         check=True,
         timeout=30,
         cwd=cwd,
@@ -46,7 +47,7 @@ def _run_ffmpeg(
 
 
 @pytest.fixture(scope="module")
-def samples(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[str, str]]:
+def samples(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[str, str, Path]]:
     directory = tmp_path_factory.mktemp("managed-media")
     executable = ffmpeg.find_ffmpeg()
     assert executable is not None
@@ -97,6 +98,54 @@ def samples(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[str, str
         "+dash",
         str(directory / "sample.m4a"),
     )
+    for codec in ("flac", "eac3", "alac"):
+        video = directory / f"premium-{codec}.mp4"
+        # Synthetic E-AC-3 tests six-channel container support, not Atmos/JOC
+        # metadata. Lossless samples exercise 24-bit audio at higher rates.
+        audio_options = (
+            ["-ac", "6", "-ar", "48000"]
+            if codec == "eac3"
+            else ["-sample_fmt", "s32", "-ar", "96000"]
+        )
+        _run_ffmpeg(
+            executable,
+            "-i",
+            str(progressive),
+            "-c:v",
+            "copy",
+            "-c:a",
+            codec,
+            *audio_options,
+            str(video),
+        )
+        _run_ffmpeg(
+            executable,
+            "-i",
+            str(video),
+            "-vn",
+            "-c:a",
+            "copy",
+            *(["-bsf:a", "setts=duration=0"] if codec == "flac" else []),
+            "-movflags",
+            "+frag_keyframe+delay_moov" if codec == "eac3" else "+dash",
+            "-f",
+            "mp4",
+            str(directory / f"premium-{codec}.m4a"),
+        )
+    _run_ffmpeg(
+        executable,
+        "-i",
+        str(directory / "premium-flac.mp4"),
+        "-i",
+        str(directory / "premium-flac.m4a"),
+        "-map",
+        "0:v:0",
+        "-map",
+        "1:a:0",
+        "-c",
+        "copy",
+        str(directory / "premium-flac-with-edits.mp4"),
+    )
 
     class Handler(http.server.SimpleHTTPRequestHandler):
         def log_message(self, *_args: object) -> None:
@@ -109,11 +158,51 @@ def samples(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[str, str
     worker = threading.Thread(target=server.serve_forever, daemon=True)
     worker.start()
     try:
-        yield f"http://127.0.0.1:{server.server_port}", executable
+        yield f"http://127.0.0.1:{server.server_port}", executable, directory
     finally:
         server.shutdown()
         server.server_close()
         worker.join(timeout=5)
+
+
+def _audio_hash(executable: str, path: Path, codec: str) -> str:
+    return _run_ffmpeg(
+        executable,
+        "-i",
+        str(path),
+        "-map",
+        "0:a:0",
+        "-c:a",
+        codec,
+        "-f",
+        "hash",
+        "-hash",
+        "sha256",
+        "-",
+    ).stdout.strip()
+
+
+def test_repair_preserves_aac_encoder_delay(tmp_path: Path) -> None:
+    executable = ffmpeg.find_ffmpeg()
+    assert executable is not None
+    path = tmp_path / "aac-with-priming.m4a"
+    _run_ffmpeg(
+        executable,
+        "-f",
+        "lavfi",
+        "-i",
+        "sine=frequency=440:sample_rate=48000",
+        "-t",
+        "2",
+        "-c:a",
+        "aac",
+        str(path),
+    )
+    before = _audio_hash(executable, path, "pcm_s32le")
+    result = ffmpeg.repair_audio_container(path, executable)
+    assert result.success, result.messages
+    assert before == _audio_hash(executable, path, "pcm_s32le")
+    _assert_media(executable, path, video=False, audio=True)
 
 
 def _assert_media(executable: str, path: Path, *, video: bool, audio: bool) -> None:
@@ -160,16 +249,24 @@ def _assert_media(executable: str, path: Path, *, video: bool, audio: bool) -> N
         ("v", "sample.mp4"),
         ("all", "sample.mp4"),
         ("a", "sample.m4a"),
+        ("a", "premium-flac.m4a"),
+        ("all", "premium-flac.mp4"),
+        ("a", "premium-eac3.m4a"),
+        ("all", "premium-eac3.mp4"),
+        ("a", "premium-alac.m4a"),
+        ("all", "premium-alac.mp4"),
+        ("all", "premium-flac-with-edits.mp4"),
+        ("v", "premium-flac-with-edits.mp4"),
     ],
 )
 def test_managed_dependencies_download_and_process(
-    samples: tuple[str, str],
+    samples: tuple[str, str, Path],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     mode: str,
     resource: str,
 ) -> None:
-    base, executable = samples
+    base, executable, source_directory = samples
     monkeypatch.setenv("PATH", "")
     monkeypatch.delenv("IMAGEIO_FFMPEG_EXE", raising=False)
     monkeypatch.chdir(tmp_path)
@@ -203,3 +300,53 @@ def test_managed_dependencies_download_and_process(
         _assert_media(executable, result.additional_paths[0], video=False, audio=True)
     elif mode == "a":
         assert stages[-1] == "repair"
+    if resource.startswith("premium-"):
+        audio = result.additional_paths[0] if mode == "all" else result.output_path
+        expected_codec = Path(resource).stem.split("-")[1]
+        inspection = subprocess.run(
+            [executable, "-hide_banner", "-i", str(audio)],
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+        )
+        assert f"Audio: {expected_codec}" in inspection.stderr
+        if expected_codec == "eac3":
+            assert "48000 Hz, 5.1" in inspection.stderr
+        else:
+            assert "96000 Hz" in inspection.stderr and "24 bit" in inspection.stderr
+        # Compare both compressed packets and decoded PCM, so success cannot
+        # silently mean transcoding or changing sample precision/channels.
+        for audio_codec in ("copy", "pcm_s32le"):
+            reference = source_directory / (
+                "premium-flac.m4a" if "with-edits" in resource else resource
+            )
+            hashes = [_audio_hash(executable, target, audio_codec) for target in (reference, audio)]
+            assert hashes[0] and hashes[0] == hashes[1]
+        if "with-edits" in resource:
+            # Video data and presentation timing must survive the FLAC fix;
+            # decoding timestamps may change to use signed CTS offsets.
+            frames = [
+                _run_ffmpeg(
+                    executable,
+                    "-i",
+                    str(path),
+                    "-map",
+                    "0:v:0",
+                    "-c",
+                    "copy",
+                    "-f",
+                    "framehash",
+                    "-",
+                ).stdout.splitlines()
+                for path in (source_directory / resource, result.output_path)
+            ]
+            signatures = [
+                [
+                    (row.split(",")[2], row.rsplit(",", 1)[1])
+                    for row in rows
+                    if not row.startswith("#")
+                ]
+                for rows in frames
+            ]
+            assert signatures[0] and signatures[0] == signatures[1]

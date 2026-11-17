@@ -35,13 +35,17 @@ yt-dlp 是 Python 依赖，命令固定为当前 `sys.executable -m yt_dlp`，�
 
 预查询以单行可用 stdout 路径为准；多行（含重复路径）表示当前不支持的多个输出目标，在下载前失败，避免旧式分段 FLV 同名冲突。非零退出码但有单一路径时告警。下载阶段以目标文件是否存在判断结果，非零退出码但文件存在时告警并继续后处理。这是当前约定，不代表仅凭退出码或文件存在能证明任意外部任务完整。
 
-音频修复通过 `ffmpeg -c:a copy -movflags +faststart` 无损重封装；直接音频下载与从视频提取音频都要覆盖。运行时不依赖 ffprobe；如开发者另行安装了 ffprobe，可用以下命令辅助诊断：
+音频修复通过 `ffmpeg -c:a copy -movflags +faststart -f mp4` 无损重封装；直接音频下载与从视频提取音频都要覆盖，提取步骤也显式 `-f mp4`。不能仅凭 `.m4a` 扩展名选择封装器：FFmpeg 会选择限制更多的 iPod 封装器，拒绝 Hi-Res FLAC 和 E-AC-3。保留原音频编码、采样率、位深与声道，不转为 AAC；扩展名不代表音频编码。运行时不依赖 ffprobe；如开发者另行安装了 ffprobe，可用以下命令辅助诊断：
 
 ```bash
 ffprobe -v error -show_entries format=format_name:format_tags=major_brand,compatible_brands path.m4a
 ```
 
 需要更细检查时查看 ffmpeg trace 中的 `moov` / `mdat` 顺序。不要把某次样本的精确 atom offset 写成通用不变量。
+
+B 站分片 FLAC 可能缺少包时长，MP4 自动编辑列表会隐藏最后一个包。通过有边界的 ISO BMFF box 遍历检查 `stsd` 的 `fLaC` sample entry，仅对 FLAC 设置 `-use_editlist 0`；不从 FFmpeg 日志推断编码，不依赖 ffprobe。不能全局禁用编辑列表，否则 AAC 的编码延迟会变成额外前导音频。回归必须比较音频包与解码 PCM 的哈希，并覆盖零时长 FLAC 尾包和带编码延迟的 AAC。
+
+yt-dlp 的 MP4 合并步骤也可能生成隐藏 FLAC 尾包的编辑列表。`v` / `all` 下载后先调用 `repair_flac_video_container()`，仅对含 FLAC 的文件用 `-ignore_editlist 1` 读取完整输入，`-c copy -use_editlist 0 -movflags +faststart+negative_cts_offsets` 重建容器，保持视频呈现时间戳并恢复音轨。临时输出验证尺寸后替换，失败保留原视频且停止独立音频提取。视频包哈希和 PTS 与修复前比较，音频与合并前的原轨比较，不能仅比较两份同样不完整的输出。
 
 项目捕获的 FFmpeg 诊断显式按 UTF-8 解码，并替换非法字节，避免 Windows CP936 环境下损坏媒体的 Unicode 路径导致诊断读取异常；这不改变终端编码或 yt-dlp 原生输出。
 
